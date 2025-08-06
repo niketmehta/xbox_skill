@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 from config import Config
 from data_provider import MarketDataProvider
+from broker_integration import AlpacaBroker
 
 class Position:
     """Represents a trading position"""
@@ -85,6 +86,15 @@ class PortfolioManager:
         self.config = Config()
         self.logger = logging.getLogger(__name__)
         
+        # Initialize broker for actual trading
+        self.broker = AlpacaBroker()
+        if self.broker.is_connected():
+            self.logger.info("Connected to Alpaca broker for live trading")
+            # Sync with broker account
+            self._sync_with_broker()
+        else:
+            self.logger.warning("Broker not connected - running in simulation mode")
+        
         # Portfolio state
         self.positions: Dict[str, Position] = {}
         self.cash_balance = self.config.MAX_PORTFOLIO_VALUE
@@ -104,6 +114,43 @@ class PortfolioManager:
         
         # Load existing positions if any
         self._load_positions()
+    
+    def _sync_with_broker(self):
+        """Sync portfolio state with broker account"""
+        try:
+            if not self.broker.is_connected():
+                return
+            
+            # Get account info
+            account_info = self.broker.get_account_info()
+            if account_info:
+                self.cash_balance = account_info.get('cash', self.cash_balance)
+                self.logger.info(f"Synced with broker - Cash: ${self.cash_balance:.2f}")
+            
+            # Get broker positions and sync
+            broker_positions = self.broker.get_positions()
+            for broker_pos in broker_positions:
+                symbol = broker_pos['symbol']
+                
+                # Create position object from broker data
+                position = Position(
+                    symbol=symbol,
+                    quantity=broker_pos['quantity'],
+                    entry_price=broker_pos['avg_entry_price'],
+                    entry_time=datetime.now(),  # Approximate, since we don't have exact time
+                    position_type='LONG' if broker_pos['quantity'] > 0 else 'SHORT',
+                    stop_loss=0,  # Will be set by strategy
+                    take_profit=0  # Will be set by strategy
+                )
+                
+                position.current_price = broker_pos['current_price']
+                position.unrealized_pnl = broker_pos['unrealized_pl']
+                
+                self.positions[symbol] = position
+                self.logger.info(f"Synced position: {symbol} - {broker_pos['quantity']} shares")
+                
+        except Exception as e:
+            self.logger.error(f"Error syncing with broker: {e}")
         
     def _init_database(self):
         """Initialize SQLite database for trade tracking"""
@@ -236,10 +283,53 @@ class PortfolioManager:
             return False
         
         try:
+            # Execute trade through broker if connected
+            if self.broker.is_connected():
+                side = 'buy' if position_type == 'LONG' else 'sell'
+                
+                # Place bracket order with stop loss and take profit
+                if stop_loss and take_profit:
+                    order_result = self.broker.place_bracket_order(
+                        symbol=symbol,
+                        quantity=abs(quantity),
+                        side=side,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit
+                    )
+                else:
+                    # Place simple market order
+                    order_result = self.broker.place_order(
+                        symbol=symbol,
+                        quantity=abs(quantity),
+                        side=side,
+                        order_type='market'
+                    )
+                
+                if not order_result.get('success', False):
+                    self.logger.error(f"Broker order failed: {order_result.get('error', 'Unknown error')}")
+                    return False
+                
+                # Use filled price if available, otherwise use entry_price
+                actual_entry_price = order_result.get('filled_avg_price', entry_price)
+                actual_quantity = order_result.get('filled_qty', quantity)
+                
+                if actual_quantity == 0:
+                    self.logger.warning(f"Order not filled for {symbol}")
+                    return False
+                
+                self.logger.info(f"Broker order executed: {order_result.get('order_id')}")
+                
+            else:
+                # Simulation mode
+                actual_entry_price = entry_price
+                actual_quantity = quantity
+                self.logger.info(f"Simulation mode - no actual trade executed")
+            
+            # Create position object
             position = Position(
                 symbol=symbol,
-                quantity=quantity,
-                entry_price=entry_price,
+                quantity=actual_quantity,
+                entry_price=actual_entry_price,
                 entry_time=datetime.now(),
                 position_type=position_type,
                 stop_loss=stop_loss,
@@ -247,13 +337,20 @@ class PortfolioManager:
             )
             
             self.positions[symbol] = position
-            self.cash_balance -= position_size
+            
+            # Update cash balance (only in simulation mode or if broker not connected)
+            if not self.broker.is_connected():
+                self.cash_balance -= abs(actual_quantity) * actual_entry_price
+            else:
+                # Sync with broker to get updated cash balance
+                self._sync_with_broker()
+            
             self.daily_trades += 1
             
             # Save to database
             self._save_position(position)
             
-            self.logger.info(f"Opened {position_type} position: {symbol} x{quantity} @ ${entry_price:.2f}")
+            self.logger.info(f"Opened {position_type} position: {symbol} x{actual_quantity} @ ${actual_entry_price:.2f}")
             return True
             
         except Exception as e:
@@ -269,14 +366,39 @@ class PortfolioManager:
         
         try:
             position = self.positions[symbol]
-            position.update_price(exit_price)
+            
+            # Execute trade through broker if connected
+            if self.broker.is_connected():
+                close_result = self.broker.close_position(symbol)
+                
+                if not close_result.get('success', False):
+                    self.logger.error(f"Broker close failed: {close_result.get('error', 'Unknown error')}")
+                    return False
+                
+                self.logger.info(f"Broker position closed: {close_result.get('order_id')}")
+                
+                # Sync with broker to get updated positions and cash
+                self._sync_with_broker()
+                
+                # Get actual exit price from broker if available
+                # For now, use the provided exit_price
+                actual_exit_price = exit_price
+                
+            else:
+                # Simulation mode
+                actual_exit_price = exit_price
+                self.logger.info(f"Simulation mode - no actual trade executed")
+            
+            position.update_price(actual_exit_price)
             
             # Calculate realized P&L
             realized_pnl = position.unrealized_pnl
             position_value = position.get_market_value()
             
-            # Update portfolio
-            self.cash_balance += position_value
+            # Update portfolio (only in simulation mode)
+            if not self.broker.is_connected():
+                self.cash_balance += position_value
+            
             self.daily_pnl += realized_pnl
             self.total_pnl += realized_pnl
             
@@ -289,12 +411,12 @@ class PortfolioManager:
                 self.winning_streak = 0
             
             # Update database
-            self._update_position_exit(position, exit_price, reason)
+            self._update_position_exit(position, actual_exit_price, reason)
             
             # Remove from active positions
             del self.positions[symbol]
             
-            self.logger.info(f"Closed position: {symbol} @ ${exit_price:.2f}, P&L: ${realized_pnl:.2f}")
+            self.logger.info(f"Closed position: {symbol} @ ${actual_exit_price:.2f}, P&L: ${realized_pnl:.2f}")
             return True
             
         except Exception as e:
@@ -328,11 +450,41 @@ class PortfolioManager:
     
     def liquidate_all_positions(self, reason: str = "End of day liquidation"):
         """Close all open positions"""
+        
+        # Use broker's close all positions if connected
+        if self.broker.is_connected():
+            try:
+                result = self.broker.close_all_positions()
+                if result.get('success', False):
+                    self.logger.info(f"Broker liquidated all positions: {reason}")
+                    
+                    # Update P&L for all positions before clearing
+                    for symbol, position in self.positions.items():
+                        realized_pnl = position.unrealized_pnl
+                        self.daily_pnl += realized_pnl
+                        self.total_pnl += realized_pnl
+                        
+                        # Update database
+                        self._update_position_exit(position, position.current_price, reason)
+                    
+                    # Clear positions and sync with broker
+                    self.positions.clear()
+                    self._sync_with_broker()
+                    
+                    self.logger.info(f"All positions liquidated via broker: {reason}")
+                    return
+                else:
+                    self.logger.warning(f"Broker liquidation failed: {result.get('error', 'Unknown error')}")
+            except Exception as e:
+                self.logger.error(f"Error with broker liquidation: {e}")
+        
+        # Fallback to individual position closing
         positions_to_close = list(self.positions.keys())
         
         for symbol in positions_to_close:
-            position = self.positions[symbol]
-            self.close_position(symbol, position.current_price, reason)
+            position = self.positions.get(symbol)
+            if position:
+                self.close_position(symbol, position.current_price, reason)
         
         self.logger.info(f"Liquidated all positions: {reason}")
     

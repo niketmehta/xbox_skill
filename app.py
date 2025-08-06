@@ -235,6 +235,40 @@ def get_config():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/broker/account')
+def get_broker_account():
+    """Get broker account information"""
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    
+    try:
+        if hasattr(trading_agent.portfolio_manager, 'broker'):
+            account_info = trading_agent.portfolio_manager.broker.get_account_info()
+            broker_connected = trading_agent.portfolio_manager.broker.is_connected()
+            return jsonify({
+                'connected': broker_connected,
+                'account_info': account_info
+            })
+        else:
+            return jsonify({'connected': False, 'account_info': {}})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/broker/orders')
+def get_broker_orders():
+    """Get broker orders"""
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    
+    try:
+        if hasattr(trading_agent.portfolio_manager, 'broker'):
+            orders = trading_agent.portfolio_manager.broker.get_orders(limit=50)
+            return jsonify({'orders': orders})
+        else:
+            return jsonify({'orders': []})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({'error': 'Not found'}), 404
