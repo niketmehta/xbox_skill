@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day Trading Agent Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .title {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #7f8c8d;
+            font-size: 1.1em;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .btn-start {
+            background: #27ae60;
+            color: white;
+        }
+
+        .btn-stop {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-liquidate {
+            background: #f39c12;
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+        }
+
+        .card-header {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #3498db;
+        }
+
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding: 5px 0;
+        }
+
+        .metric-label {
+            color: #7f8c8d;
+        }
+
+        .metric-value {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .positive {
+            color: #27ae60;
+        }
+
+        .negative {
+            color: #e74c3c;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-running {
+            background: #27ae60;
+            animation: pulse 2s infinite;
+        }
+
+        .status-stopped {
+            background: #e74c3c;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .table-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background: #f8f9fa;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .watchlist-container {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .watchlist-input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+
+        .loading {
+            text-align: center;
+            color: #7f8c8d;
+            font-style: italic;
+        }
+
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+
+        .refresh-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+
+        .analysis-popup {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        .analysis-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .close-btn {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+        }
+
+        .signal-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: white;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+
+        .signal-buy {
+            background: #27ae60;
+        }
+
+        .signal-sell {
+            background: #e74c3c;
+        }
+
+        .signal-hold {
+            background: #95a5a6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="title">🤖 Day Trading Agent</h1>
+            <p class="subtitle">Automated stock trading with real-time analysis and risk management</p>
+            <div class="controls">
+                <button class="btn btn-start" onclick="startAgent()">Start Agent</button>
+                <button class="btn btn-stop" onclick="stopAgent()">Stop Agent</button>
+                <button class="btn btn-liquidate" onclick="liquidatePositions()">Liquidate All</button>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- Agent Status -->
+            <div class="card">
+                <div class="card-header">Agent Status</div>
+                <div id="agent-status">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Portfolio Summary -->
+            <div class="card">
+                <div class="card-header">Portfolio Summary</div>
+                <div id="portfolio-summary">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Performance Metrics -->
+            <div class="card">
+                <div class="card-header">Performance</div>
+                <div id="performance-metrics">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Market Status -->
+            <div class="card">
+                <div class="card-header">Market Status</div>
+                <div id="market-status">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Current Positions -->
+        <div class="table-container">
+            <div class="card-header">
+                Current Positions
+                <button class="refresh-btn" onclick="refreshPositions()">Refresh</button>
+            </div>
+            <div id="positions-table">
+                <div class="loading">Loading positions...</div>
+            </div>
+        </div>
+
+        <!-- Watchlist -->
+        <div class="table-container" style="margin-top: 20px;">
+            <div class="card-header">
+                Watchlist
+                <button class="refresh-btn" onclick="refreshWatchlist()">Refresh</button>
+            </div>
+            <div class="watchlist-container">
+                <input type="text" class="watchlist-input" id="symbol-input" placeholder="Enter symbol (e.g., AAPL)" maxlength="10">
+                <button class="btn" style="background: #3498db; color: white;" onclick="addToWatchlist()">Add</button>
+            </div>
+            <div id="watchlist-table">
+                <div class="loading">Loading watchlist...</div>
+            </div>
+        </div>
+
+        <!-- Market Movers -->
+        <div class="table-container" style="margin-top: 20px;">
+            <div class="card-header">
+                Market Movers
+                <button class="refresh-btn" onclick="refreshMarketMovers()">Refresh</button>
+            </div>
+            <div id="market-movers">
+                <div class="loading">Loading market movers...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Analysis Popup -->
+    <div class="analysis-popup" id="analysis-popup">
+        <div class="analysis-content">
+            <button class="close-btn" onclick="closeAnalysis()">&times;</button>
+            <div id="analysis-content">
+                <!-- Analysis details will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let refreshInterval;
+
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshDashboard();
+            startAutoRefresh();
+        });
+
+        function startAutoRefresh() {
+            refreshInterval = setInterval(refreshDashboard, 10000); // Refresh every 10 seconds
+        }
+
+        function stopAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+        }
+
+        async function refreshDashboard() {
+            try {
+                await Promise.all([
+                    refreshStatus(),
+                    refreshPortfolio(),
+                    refreshPerformance(),
+                    refreshMarketStatus(),
+                    refreshPositions(),
+                    refreshWatchlist(),
+                    refreshMarketMovers()
+                ]);
+            } catch (error) {
+                console.error('Error refreshing dashboard:', error);
+            }
+        }
+
+        async function refreshStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                if (data.error) {
+                    document.getElementById('agent-status').innerHTML = `<div class="error">${data.error}</div>`;
+                    return;
+                }
+
+                const status = data.agent_status;
+                const statusHtml = `
+                    <div class="metric">
+                        <span class="metric-label">Status:</span>
+                        <span class="metric-value">
+                            <span class="status-indicator ${status.is_running ? 'status-running' : 'status-stopped'}"></span>
+                            ${status.is_running ? 'Running' : 'Stopped'}
+                        </span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Market Hours:</span>
+                        <span class="metric-value ${status.is_market_hours ? 'positive' : 'negative'}">
+                            ${status.is_market_hours ? 'Active' : 'Closed'}
+                        </span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Last Scan:</span>
+                        <span class="metric-value">${new Date(status.last_scan).toLocaleTimeString()}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Watchlist Size:</span>
+                        <span class="metric-value">${status.watchlist_size}</span>
+                    </div>
+                `;
+                
+                document.getElementById('agent-status').innerHTML = statusHtml;
+            } catch (error) {
+                document.getElementById('agent-status').innerHTML = `<div class="error">Error loading status</div>`;
+            }
+        }
+
+        async function refreshPortfolio() {
+            try {
+                const response = await fetch('/api/portfolio');
+                const data = await response.json();
+                
+                if (data.error) {
+                    document.getElementById('portfolio-summary').innerHTML = `<div class="error">${data.error}</div>`;
+                    return;
+                }
+
+                const portfolioHtml = `
+                    <div class="metric">
+                        <span class="metric-label">Total Value:</span>
+                        <span class="metric-value">$${data.total_portfolio_value.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Cash Balance:</span>
+                        <span class="metric-value">$${data.cash_balance.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Daily P&L:</span>
+                        <span class="metric-value ${data.daily_pnl >= 0 ? 'positive' : 'negative'}">
+                            $${data.daily_pnl.toLocaleString('en-US', {minimumFractionDigits: 2})}
+                        </span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Unrealized P&L:</span>
+                        <span class="metric-value ${data.unrealized_pnl >= 0 ? 'positive' : 'negative'}">
+                            $${data.unrealized_pnl.toLocaleString('en-US', {minimumFractionDigits: 2})}
+                        </span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Positions:</span>
+                        <span class="metric-value">${data.num_positions}/${data.risk_metrics.max_positions_limit}</span>
+                    </div>
+                `;
+                
+                document.getElementById('portfolio-summary').innerHTML = portfolioHtml;
+            } catch (error) {
+                document.getElementById('portfolio-summary').innerHTML = `<div class="error">Error loading portfolio</div>`;
+            }
+        }
+
+        async function refreshPerformance() {
+            try {
+                const response = await fetch('/api/performance');
+                const data = await response.json();
+                
+                if (data.error || !data.total_trades) {
+                    document.getElementById('performance-metrics').innerHTML = '<div class="loading">No trading history yet</div>';
+                    return;
+                }
+
+                const performanceHtml = `
+                    <div class="metric">
+                        <span class="metric-label">Win Rate:</span>
+                        <span class="metric-value ${data.win_rate >= 50 ? 'positive' : 'negative'}">
+                            ${data.win_rate.toFixed(1)}%
+                        </span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Total Trades:</span>
+                        <span class="metric-value">${data.total_trades}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Profit Factor:</span>
+                        <span class="metric-value ${data.profit_factor >= 1 ? 'positive' : 'negative'}">
+                            ${data.profit_factor.toFixed(2)}
+                        </span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Avg Win:</span>
+                        <span class="metric-value positive">$${data.avg_win.toFixed(2)}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Avg Loss:</span>
+                        <span class="metric-value negative">$${data.avg_loss.toFixed(2)}</span>
+                    </div>
+                `;
+                
+                document.getElementById('performance-metrics').innerHTML = performanceHtml;
+            } catch (error) {
+                document.getElementById('performance-metrics').innerHTML = `<div class="error">Error loading performance</div>`;
+            }
+        }
+
+        async function refreshMarketStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                if (data.error) {
+                    document.getElementById('market-status').innerHTML = `<div class="error">${data.error}</div>`;
+                    return;
+                }
+
+                const market = data.market_status;
+                const marketHtml = `
+                    <div class="metric">
+                        <span class="metric-label">Market Open:</span>
+                        <span class="metric-value ${market.is_market_open ? 'positive' : 'negative'}">
+                            ${market.is_market_open ? 'Yes' : 'No'}
+                        </span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Extended Hours:</span>
+                        <span class="metric-value ${market.is_extended_hours ? 'positive' : 'negative'}">
+                            ${market.is_extended_hours ? 'Yes' : 'No'}
+                        </span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Current Time:</span>
+                        <span class="metric-value">${new Date().toLocaleTimeString()}</span>
+                    </div>
+                `;
+                
+                document.getElementById('market-status').innerHTML = marketHtml;
+            } catch (error) {
+                document.getElementById('market-status').innerHTML = `<div class="error">Error loading market status</div>`;
+            }
+        }
+
+        async function refreshPositions() {
+            try {
+                const response = await fetch('/api/positions');
+                const data = await response.json();
+                
+                if (data.error) {
+                    document.getElementById('positions-table').innerHTML = `<div class="error">${data.error}</div>`;
+                    return;
+                }
+
+                if (!data.positions || data.positions.length === 0) {
+                    document.getElementById('positions-table').innerHTML = '<div class="loading">No open positions</div>';
+                    return;
+                }
+
+                let tableHtml = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Quantity</th>
+                                <th>Entry Price</th>
+                                <th>Current Price</th>
+                                <th>P&L</th>
+                                <th>Market Value</th>
+                                <th>Stop Loss</th>
+                                <th>Take Profit</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                data.positions.forEach(pos => {
+                    tableHtml += `
+                        <tr>
+                            <td><strong>${pos.symbol}</strong></td>
+                            <td>${pos.quantity}</td>
+                            <td>$${pos.entry_price.toFixed(2)}</td>
+                            <td>$${pos.current_price.toFixed(2)}</td>
+                            <td class="${pos.unrealized_pnl >= 0 ? 'positive' : 'negative'}">
+                                $${pos.unrealized_pnl.toFixed(2)}
+                            </td>
+                            <td>$${pos.market_value.toFixed(2)}</td>
+                            <td>${pos.stop_loss ? '$' + pos.stop_loss.toFixed(2) : '-'}</td>
+                            <td>${pos.take_profit ? '$' + pos.take_profit.toFixed(2) : '-'}</td>
+                        </tr>
+                    `;
+                });
+
+                tableHtml += '</tbody></table>';
+                document.getElementById('positions-table').innerHTML = tableHtml;
+            } catch (error) {
+                document.getElementById('positions-table').innerHTML = `<div class="error">Error loading positions</div>`;
+            }
+        }
+
+        async function refreshWatchlist() {
+            try {
+                const response = await fetch('/api/watchlist');
+                const data = await response.json();
+                
+                if (data.error) {
+                    document.getElementById('watchlist-table').innerHTML = `<div class="error">${data.error}</div>`;
+                    return;
+                }
+
+                if (!data.watchlist || data.watchlist.length === 0) {
+                    document.getElementById('watchlist-table').innerHTML = '<div class="loading">No symbols in watchlist</div>';
+                    return;
+                }
+
+                let tableHtml = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                data.watchlist.forEach(symbol => {
+                    tableHtml += `
+                        <tr>
+                            <td><strong>${symbol}</strong></td>
+                            <td>
+                                <button class="btn" style="background: #3498db; color: white; padding: 4px 8px; font-size: 0.8em;" onclick="analyzeSymbol('${symbol}')">Analyze</button>
+                                <button class="btn" style="background: #e74c3c; color: white; padding: 4px 8px; font-size: 0.8em;" onclick="removeFromWatchlist('${symbol}')">Remove</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                tableHtml += '</tbody></table>';
+                document.getElementById('watchlist-table').innerHTML = tableHtml;
+            } catch (error) {
+                document.getElementById('watchlist-table').innerHTML = `<div class="error">Error loading watchlist</div>`;
+            }
+        }
+
+        async function refreshMarketMovers() {
+            try {
+                const response = await fetch('/api/market-movers');
+                const data = await response.json();
+                
+                if (data.error) {
+                    document.getElementById('market-movers').innerHTML = `<div class="error">${data.error}</div>`;
+                    return;
+                }
+
+                if (!data.movers || data.movers.length === 0) {
+                    document.getElementById('market-movers').innerHTML = '<div class="loading">No market data available</div>';
+                    return;
+                }
+
+                let tableHtml = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Price</th>
+                                <th>Change</th>
+                                <th>Change %</th>
+                                <th>Volume</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                data.movers.slice(0, 10).forEach(mover => {
+                    tableHtml += `
+                        <tr>
+                            <td><strong>${mover.symbol}</strong></td>
+                            <td>$${mover.current_price ? mover.current_price.toFixed(2) : 'N/A'}</td>
+                            <td class="${mover.change >= 0 ? 'positive' : 'negative'}">
+                                $${mover.change ? mover.change.toFixed(2) : 'N/A'}
+                            </td>
+                            <td class="${mover.change_percent >= 0 ? 'positive' : 'negative'}">
+                                ${mover.change_percent ? mover.change_percent.toFixed(2) : 'N/A'}%
+                            </td>
+                            <td>${mover.volume ? mover.volume.toLocaleString() : 'N/A'}</td>
+                        </tr>
+                    `;
+                });
+
+                tableHtml += '</tbody></table>';
+                document.getElementById('market-movers').innerHTML = tableHtml;
+            } catch (error) {
+                document.getElementById('market-movers').innerHTML = `<div class="error">Error loading market movers</div>`;
+            }
+        }
+
+        // Agent controls
+        async function startAgent() {
+            try {
+                const response = await fetch('/api/start-agent', { method: 'POST' });
+                const data = await response.json();
+                alert(data.message || data.error);
+                refreshStatus();
+            } catch (error) {
+                alert('Error starting agent: ' + error.message);
+            }
+        }
+
+        async function stopAgent() {
+            try {
+                const response = await fetch('/api/stop-agent', { method: 'POST' });
+                const data = await response.json();
+                alert(data.message || data.error);
+                refreshStatus();
+            } catch (error) {
+                alert('Error stopping agent: ' + error.message);
+            }
+        }
+
+        async function liquidatePositions() {
+            if (!confirm('Are you sure you want to liquidate all positions?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/liquidate', { method: 'POST' });
+                const data = await response.json();
+                alert(data.message || data.error);
+                refreshPositions();
+                refreshPortfolio();
+            } catch (error) {
+                alert('Error liquidating positions: ' + error.message);
+            }
+        }
+
+        // Watchlist management
+        async function addToWatchlist() {
+            const symbolInput = document.getElementById('symbol-input');
+            const symbol = symbolInput.value.trim().toUpperCase();
+            
+            if (!symbol) {
+                alert('Please enter a symbol');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/watchlist/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol: symbol })
+                });
+                const data = await response.json();
+                alert(data.message || data.error);
+                symbolInput.value = '';
+                refreshWatchlist();
+            } catch (error) {
+                alert('Error adding to watchlist: ' + error.message);
+            }
+        }
+
+        async function removeFromWatchlist(symbol) {
+            try {
+                const response = await fetch('/api/watchlist/remove', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol: symbol })
+                });
+                const data = await response.json();
+                refreshWatchlist();
+            } catch (error) {
+                alert('Error removing from watchlist: ' + error.message);
+            }
+        }
+
+        // Symbol analysis
+        async function analyzeSymbol(symbol) {
+            try {
+                const response = await fetch(`/api/analyze/${symbol}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert('Error analyzing symbol: ' + data.error);
+                    return;
+                }
+
+                showAnalysis(data);
+            } catch (error) {
+                alert('Error analyzing symbol: ' + error.message);
+            }
+        }
+
+        function showAnalysis(analysis) {
+            const recommendation = analysis.recommendation || {};
+            const signals = analysis.signals || {};
+            
+            let analysisHtml = `
+                <h2>Analysis: ${analysis.symbol}</h2>
+                <div style="margin: 20px 0;">
+                    <h3>Current Price: $${analysis.current_price ? analysis.current_price.toFixed(2) : 'N/A'}</h3>
+                </div>
+                
+                <div style="margin: 20px 0;">
+                    <h3>Recommendation</h3>
+                    <div class="metric">
+                        <span class="metric-label">Action:</span>
+                        <span class="signal-badge signal-${recommendation.action ? recommendation.action.toLowerCase() : 'hold'}">
+                            ${recommendation.action || 'HOLD'}
+                        </span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Confidence:</span>
+                        <span class="metric-value">${recommendation.confidence ? recommendation.confidence.toFixed(1) : 'N/A'}%</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Position Size:</span>
+                        <span class="metric-value">$${recommendation.position_size ? recommendation.position_size.toFixed(2) : 'N/A'}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Stop Loss:</span>
+                        <span class="metric-value">$${recommendation.stop_loss ? recommendation.stop_loss.toFixed(2) : 'N/A'}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Take Profit:</span>
+                        <span class="metric-value">$${recommendation.take_profit ? recommendation.take_profit.toFixed(2) : 'N/A'}</span>
+                    </div>
+                </div>
+            `;
+            
+            if (signals.combined_score) {
+                analysisHtml += `
+                    <div style="margin: 20px 0;">
+                        <h3>Signal Analysis</h3>
+                        <div class="metric">
+                            <span class="metric-label">Combined Score:</span>
+                            <span class="metric-value">${signals.combined_score.strength ? signals.combined_score.strength.toFixed(1) : 'N/A'}</span>
+                        </div>
+                `;
+                
+                const strategies = ['momentum', 'reversal', 'breakout', 'volume'];
+                strategies.forEach(strategy => {
+                    if (signals[strategy]) {
+                        analysisHtml += `
+                            <div class="metric">
+                                <span class="metric-label">${strategy.charAt(0).toUpperCase() + strategy.slice(1)}:</span>
+                                <span class="signal-badge signal-${signals[strategy].signal ? signals[strategy].signal.toLowerCase() : 'hold'}">
+                                    ${signals[strategy].signal || 'HOLD'}
+                                </span>
+                                <span style="margin-left: 10px;">${signals[strategy].strength ? signals[strategy].strength.toFixed(1) : 'N/A'}%</span>
+                            </div>
+                        `;
+                    }
+                });
+                
+                analysisHtml += '</div>';
+            }
+            
+            document.getElementById('analysis-content').innerHTML = analysisHtml;
+            document.getElementById('analysis-popup').style.display = 'block';
+        }
+
+        function closeAnalysis() {
+            document.getElementById('analysis-popup').style.display = 'none';
+        }
+
+        // Allow Enter key for adding to watchlist
+        document.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && e.target.id === 'symbol-input') {
+                addToWatchlist();
+            }
+        });
+
+        // Close analysis popup when clicking outside
+        document.getElementById('analysis-popup').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeAnalysis();
+            }
+        });
+    </script>
+</body>
+</html>
