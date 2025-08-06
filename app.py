@@ -269,6 +269,72 @@ def get_broker_orders():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/auto-watchlist/enable', methods=['POST'])
+def enable_auto_watchlist():
+    """Enable automatic watchlist generation"""
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    
+    try:
+        data = request.get_json() or {}
+        enabled = data.get('enabled', True)
+        
+        trading_agent.enable_auto_watchlist(enabled)
+        
+        return jsonify({
+            'message': f"Auto watchlist {'enabled' if enabled else 'disabled'}",
+            'enabled': enabled
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/screen-stocks')
+def screen_stocks():
+    """Screen stocks with specific criteria"""
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    
+    try:
+        screen_type = request.args.get('type', 'day_trading')
+        max_stocks = request.args.get('max_stocks', 25, type=int)
+        
+        screened_stocks = trading_agent.screen_stocks_manual(screen_type, max_stocks)
+        
+        return jsonify({
+            'screen_type': screen_type,
+            'stocks': screened_stocks,
+            'count': len(screened_stocks)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/screening-options')
+def get_screening_options():
+    """Get available screening options"""
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    
+    try:
+        options = trading_agent.get_screening_options()
+        return jsonify({'options': options})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/auto-watchlist/status')
+def get_auto_watchlist_status():
+    """Get auto watchlist status"""
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    
+    try:
+        return jsonify({
+            'enabled': trading_agent.auto_watchlist_enabled,
+            'last_update': trading_agent.last_watchlist_update.isoformat() if trading_agent.last_watchlist_update != trading_agent.last_watchlist_update.min else None,
+            'watchlist_size': len(trading_agent.watchlist)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({'error': 'Not found'}), 404
