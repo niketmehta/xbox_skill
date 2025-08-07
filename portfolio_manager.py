@@ -86,16 +86,7 @@ class PortfolioManager:
         self.config = Config()
         self.logger = logging.getLogger(__name__)
         
-        # Initialize broker for actual trading
-        self.broker = AlpacaBroker()
-        if self.broker.is_connected():
-            self.logger.info("Connected to Alpaca broker for live trading")
-            # Sync with broker account
-            self._sync_with_broker()
-        else:
-            self.logger.warning("Broker not connected - running in simulation mode")
-        
-        # Portfolio state
+        # Portfolio state - Initialize first
         self.positions: Dict[str, Position] = {}
         self.cash_balance = self.config.MAX_PORTFOLIO_VALUE
         self.daily_pnl = 0
@@ -111,6 +102,15 @@ class PortfolioManager:
         # Database for persistence
         self.db_path = Path("trading_data.db")
         self._init_database()
+        
+        # Initialize broker for actual trading
+        self.broker = AlpacaBroker()
+        if self.broker.is_connected():
+            self.logger.info("Connected to Alpaca broker for live trading")
+            # Sync with broker account
+            self._sync_with_broker()
+        else:
+            self.logger.warning("Broker not connected - running in simulation mode")
         
         # Load existing positions if any
         self._load_positions()
@@ -151,6 +151,8 @@ class PortfolioManager:
                 
         except Exception as e:
             self.logger.error(f"Error syncing with broker: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
         
     def _init_database(self):
         """Initialize SQLite database for trade tracking"""
