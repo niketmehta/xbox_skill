@@ -319,6 +319,38 @@
             color: #e74c3c;
             font-weight: bold;
         }
+
+        /* Sorting indicators */
+        th[onclick] {
+            position: relative;
+            transition: background-color 0.2s ease;
+        }
+
+        th[onclick]:hover {
+            background-color: rgba(52, 152, 219, 0.1);
+        }
+
+        .sort-asc {
+            background-color: rgba(52, 152, 219, 0.2);
+            color: #2980b9;
+        }
+
+        .sort-desc {
+            background-color: rgba(52, 152, 219, 0.2);
+            color: #2980b9;
+        }
+
+        .sort-asc::after {
+            content: " ▲";
+            color: #2980b9;
+            font-weight: bold;
+        }
+
+        .sort-desc::after {
+            content: " ▼";
+            color: #2980b9;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -656,14 +688,14 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>Symbol</th>
-                                <th>Quantity</th>
-                                <th>Entry Price</th>
-                                <th>Current Price</th>
-                                <th>P&L</th>
-                                <th>Market Value</th>
-                                <th>Stop Loss</th>
-                                <th>Take Profit</th>
+                                <th onclick="sortTable('positions', 0)" style="cursor: pointer; user-select: none;">Symbol</th>
+                                <th onclick="sortTable('positions', 1)" style="cursor: pointer; user-select: none;">Quantity</th>
+                                <th onclick="sortTable('positions', 2)" style="cursor: pointer; user-select: none;">Entry Price</th>
+                                <th onclick="sortTable('positions', 3)" style="cursor: pointer; user-select: none;">Current Price</th>
+                                <th onclick="sortTable('positions', 4)" style="cursor: pointer; user-select: none;">P&L</th>
+                                <th onclick="sortTable('positions', 5)" style="cursor: pointer; user-select: none;">Market Value</th>
+                                <th onclick="sortTable('positions', 6)" style="cursor: pointer; user-select: none;">Stop Loss</th>
+                                <th onclick="sortTable('positions', 7)" style="cursor: pointer; user-select: none;">Take Profit</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -712,14 +744,14 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>Symbol</th>
-                                <th>Price</th>
-                                <th>Recommendation</th>
-                                <th>Confidence</th>
-                                <th>Position Size</th>
-                                <th>Stop Loss</th>
-                                <th>Take Profit</th>
-                                <th>Actions</th>
+                                <th onclick="sortTable('watchlist', 0)" style="cursor: pointer; user-select: none;">Symbol</th>
+                                <th onclick="sortTable('watchlist', 1)" style="cursor: pointer; user-select: none;">Price</th>
+                                <th onclick="sortTable('watchlist', 2)" style="cursor: pointer; user-select: none;">Recommendation</th>
+                                <th onclick="sortTable('watchlist', 3)" style="cursor: pointer; user-select: none;">Confidence</th>
+                                <th onclick="sortTable('watchlist', 4)" style="cursor: pointer; user-select: none;">Position Size</th>
+                                <th onclick="sortTable('watchlist', 5)" style="cursor: pointer; user-select: none;">Stop Loss</th>
+                                <th onclick="sortTable('watchlist', 6)" style="cursor: pointer; user-select: none;">Take Profit</th>
+                                <th onclick="sortTable('watchlist', 7)" style="cursor: pointer; user-select: none;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -787,11 +819,11 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>Symbol</th>
-                                <th>Price</th>
-                                <th>Change</th>
-                                <th>Change %</th>
-                                <th>Volume</th>
+                                <th onclick="sortTable('marketMovers', 0)" style="cursor: pointer; user-select: none;">Symbol</th>
+                                <th onclick="sortTable('marketMovers', 1)" style="cursor: pointer; user-select: none;">Price</th>
+                                <th onclick="sortTable('marketMovers', 2)" style="cursor: pointer; user-select: none;">Change</th>
+                                <th onclick="sortTable('marketMovers', 3)" style="cursor: pointer; user-select: none;">Change %</th>
+                                <th onclick="sortTable('marketMovers', 4)" style="cursor: pointer; user-select: none;">Volume</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -819,6 +851,68 @@
                 document.getElementById('market-movers').innerHTML = `<div class="error">Error loading market movers</div>`;
             }
         }
+
+        // Sorting functionality
+        let currentSort = {
+            positions: { column: null, direction: 'asc' },
+            watchlist: { column: null, direction: 'asc' },
+            marketMovers: { column: null, direction: 'asc' }
+        };
+
+        function sortTable(tableType, columnIndex) {
+            const table = document.querySelector(`#${tableType}-table table, #${tableType} table`);
+            if (!table) return;
+
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            
+            // Update sort state
+            if (currentSort[tableType].column === columnIndex) {
+                currentSort[tableType].direction = currentSort[tableType].direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort[tableType].column = columnIndex;
+                currentSort[tableType].direction = 'asc';
+            }
+
+            // Sort rows
+            rows.sort((a, b) => {
+                const aValue = a.cells[columnIndex].textContent.trim();
+                const bValue = b.cells[columnIndex].textContent.trim();
+                
+                // Handle numeric values
+                const aNum = parseFloat(aValue.replace(/[$,%]/g, ''));
+                const bNum = parseFloat(bValue.replace(/[$,%]/g, ''));
+                
+                if (!isNaN(aNum) && !isNaN(bNum)) {
+                    return currentSort[tableType].direction === 'asc' ? aNum - bNum : bNum - aNum;
+                }
+                
+                // Handle text values
+                const comparison = aValue.localeCompare(bValue);
+                return currentSort[tableType].direction === 'asc' ? comparison : -comparison;
+            });
+
+            // Reorder rows
+            rows.forEach(row => tbody.appendChild(row));
+            
+            // Update header styling
+            updateHeaderStyling(tableType, columnIndex);
+        }
+
+        function updateHeaderStyling(tableType, activeColumn) {
+            const table = document.querySelector(`#${tableType}-table table, #${tableType} table`);
+            if (!table) return;
+
+            const headers = table.querySelectorAll('th');
+            headers.forEach((header, index) => {
+                header.classList.remove('sort-asc', 'sort-desc');
+                if (index === activeColumn) {
+                    header.classList.add(currentSort[tableType].direction === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+            });
+        }
+
+
 
         // Agent controls
         async function startAgent() {
