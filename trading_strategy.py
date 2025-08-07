@@ -22,11 +22,13 @@ class TradingStrategy:
             # Get real-time quote
             quote = self.data_provider.get_real_time_quote(symbol)
             if not quote:
+                self.logger.warning(f"No quote data available for {symbol}")
                 return {}
             
             # Get intraday data for technical analysis
             intraday_data = self.data_provider.get_intraday_data(symbol, period="1d", interval="5m")
             if intraday_data.empty:
+                self.logger.warning(f"No intraday data available for {symbol}")
                 return {}
             
             # Get extended hours data
@@ -76,9 +78,22 @@ class TradingStrategy:
         latest = data.iloc[-1]
         current_price = quote.get('current_price', latest['Close'])
         
-        # Check if price is above key moving averages
-        above_sma20 = current_price > latest.get('SMA_20', 0)
-        above_sma50 = current_price > latest.get('SMA_50', 0)
+        # Ensure we have valid price data
+        if not current_price or current_price <= 0:
+            return {'signal': 'HOLD', 'strength': 0, 'reason': 'Invalid price data'}
+        
+        # Check if price is above key moving averages (handle NaN values)
+        sma20 = latest.get('SMA_20', 0)
+        sma50 = latest.get('SMA_50', 0)
+        
+        # Handle NaN values
+        if pd.isna(sma20):
+            sma20 = current_price
+        if pd.isna(sma50):
+            sma50 = current_price
+            
+        above_sma20 = current_price > sma20
+        above_sma50 = current_price > sma50
         
         # MACD analysis
         macd_bullish = (latest.get('MACD', 0) > latest.get('MACD_Signal', 0) and
@@ -147,6 +162,9 @@ class TradingStrategy:
         
         # RSI analysis
         rsi = latest.get('RSI', 50)
+        # Handle NaN values
+        if pd.isna(rsi):
+            rsi = 50
         rsi_oversold = rsi < self.config.RSI_OVERSOLD
         rsi_overbought = rsi > self.config.RSI_OVERBOUGHT
         

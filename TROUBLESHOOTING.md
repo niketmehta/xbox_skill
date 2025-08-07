@@ -48,6 +48,43 @@ pip3 install --break-system-packages -r requirements.txt
 4. ✅ Start dashboard: `python3 app.py`
 5. ✅ Open browser: http://localhost:5000
 
+## 📊 Verification Steps
+
+Run the test script to verify everything works:
+```bash
+python3 test_agent.py
+```
+
+Expected output: All tests should PASS ✅
+
+## 🔧 Advanced Configuration
+
+### Risk Parameters (.env file):
+```bash
+MAX_PORTFOLIO_VALUE=10000      # Total portfolio limit
+MAX_POSITION_SIZE=1000         # Per-stock position limit
+STOP_LOSS_PERCENTAGE=0.02      # 2% stop loss
+TAKE_PROFIT_PERCENTAGE=0.05    # 5% take profit
+MAX_DAILY_LOSS=500            # Daily loss limit
+MAX_POSITIONS=5               # Max concurrent positions
+```
+
+### Strategy Parameters (config.py):
+```python
+RSI_OVERSOLD = 30              # RSI buy signal
+RSI_OVERBOUGHT = 70            # RSI sell signal
+VOLUME_SPIKE_THRESHOLD = 2.0   # Volume spike multiplier
+```
+
+## 📞 Getting Help
+
+If you encounter issues:
+
+1. Check the logs: `trading_agent.log`
+2. Run the test script: `python3 test_agent.py`
+3. Verify configuration: `.env` file has correct API keys
+4. Check market hours: Agent works best during market hours
+
 ## 🔒 Safety Notes
 
 - **Paper Trading**: System defaults to paper trading (safe)
