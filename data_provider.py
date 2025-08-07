@@ -167,7 +167,13 @@ class MarketDataProvider:
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             rs = gain / loss
+            # Handle division by zero and inf values
+            rs = rs.fillna(0).replace([np.inf, -np.inf], 0)
             data['RSI'] = 100 - (100 / (1 + rs))
+            data['RSI'] = data['RSI'].fillna(50)  # Fill NaN with neutral value
+            
+            # Fill NaN values with forward fill then backward fill
+            data = data.ffill().bfill()
             
             # Bollinger Bands
             data['BB_Middle'] = data['Close'].rolling(window=20).mean()
