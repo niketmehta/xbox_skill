@@ -8,6 +8,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 import logging
 from config import Config
+import pytz
 
 class MarketDataProvider:
     """
@@ -17,6 +18,7 @@ class MarketDataProvider:
     def __init__(self):
         self.config = Config()
         self.logger = logging.getLogger(__name__)
+        self.eastern_tz = pytz.timezone('US/Eastern')
         
     def get_real_time_quote(self, symbol: str) -> Dict:
         """Get real-time quote for a symbol"""
@@ -221,16 +223,26 @@ class MarketDataProvider:
             self.logger.error(f"Error getting fundamentals for {symbol}: {e}")
             return {}
     
+    def _get_eastern_time(self) -> datetime:
+        """Get current time in Eastern Time"""
+        utc_now = datetime.now(pytz.UTC)
+        return utc_now.astimezone(self.eastern_tz)
+    
+    def get_eastern_time_string(self) -> str:
+        """Get current Eastern Time as formatted string"""
+        eastern_time = self._get_eastern_time()
+        return eastern_time.strftime("%H:%M:%S")
+    
     def is_market_open(self) -> bool:
-        """Check if market is currently open"""
-        now = datetime.now()
+        """Check if market is currently open (Eastern Time)"""
+        now = self._get_eastern_time()
         weekday = now.weekday()  # 0 = Monday, 6 = Sunday
         
         # Check if it's a weekday
         if weekday >= 5:  # Saturday or Sunday
             return False
         
-        # Check time (assuming Eastern Time)
+        # Check time (Eastern Time)
         current_time = now.time()
         market_open = datetime.strptime(self.config.MARKET_OPEN, "%H:%M").time()
         market_close = datetime.strptime(self.config.MARKET_CLOSE, "%H:%M").time()
@@ -238,8 +250,8 @@ class MarketDataProvider:
         return market_open <= current_time <= market_close
     
     def is_extended_hours(self) -> bool:
-        """Check if it's extended hours trading time"""
-        now = datetime.now()
+        """Check if it's extended hours trading time (Eastern Time)"""
+        now = self._get_eastern_time()
         weekday = now.weekday()
         
         if weekday >= 5:  # Weekend

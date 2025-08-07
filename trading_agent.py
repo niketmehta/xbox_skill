@@ -348,7 +348,8 @@ class TradingAgent:
             'recent_recommendations': recent_recommendations,
             'market_status': {
                 'is_market_open': self.data_provider.is_market_open(),
-                'is_extended_hours': self.data_provider.is_extended_hours()
+                'is_extended_hours': self.data_provider.is_extended_hours(),
+                'current_time_est': self.data_provider.get_eastern_time_string()
             }
         }
     
