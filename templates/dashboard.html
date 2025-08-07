@@ -277,6 +277,48 @@
         .signal-hold {
             background: #95a5a6;
         }
+
+        .recommendation-badge {
+            padding: 6px 12px;
+            border-radius: 6px;
+            color: white;
+            font-size: 0.9em;
+            font-weight: bold;
+            text-align: center;
+            min-width: 80px;
+            display: inline-block;
+        }
+
+        .recommendation-buy {
+            background: #27ae60;
+        }
+
+        .recommendation-sell {
+            background: #e74c3c;
+        }
+
+        .recommendation-hold {
+            background: #95a5a6;
+        }
+
+        .recommendation-error {
+            background: #f39c12;
+        }
+
+        .confidence-high {
+            color: #27ae60;
+            font-weight: bold;
+        }
+
+        .confidence-medium {
+            color: #f39c12;
+            font-weight: bold;
+        }
+
+        .confidence-low {
+            color: #e74c3c;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -336,10 +378,10 @@
             </div>
         </div>
 
-        <!-- Watchlist -->
+        <!-- Watchlist with Recommendations -->
         <div class="table-container" style="margin-top: 20px;">
             <div class="card-header">
-                Watchlist
+                Watchlist & Recommendations
                 <button class="refresh-btn" onclick="refreshWatchlist()">Refresh</button>
             </div>
             
@@ -653,7 +695,7 @@
 
         async function refreshWatchlist() {
             try {
-                const response = await fetch('/api/watchlist');
+                const response = await fetch('/api/watchlist/recommendations');
                 const data = await response.json();
                 
                 if (data.error) {
@@ -661,7 +703,7 @@
                     return;
                 }
 
-                if (!data.watchlist || data.watchlist.length === 0) {
+                if (!data.recommendations || data.recommendations.length === 0) {
                     document.getElementById('watchlist-table').innerHTML = '<div class="loading">No symbols in watchlist</div>';
                     return;
                 }
@@ -671,19 +713,42 @@
                         <thead>
                             <tr>
                                 <th>Symbol</th>
-                                <th>Action</th>
+                                <th>Price</th>
+                                <th>Recommendation</th>
+                                <th>Confidence</th>
+                                <th>Position Size</th>
+                                <th>Stop Loss</th>
+                                <th>Take Profit</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                 `;
 
-                data.watchlist.forEach(symbol => {
+                data.recommendations.forEach(rec => {
+                    const actionClass = rec.action ? `recommendation-${rec.action.toLowerCase()}` : 'recommendation-hold';
+                    const confidenceClass = getConfidenceClass(rec.confidence);
+                    
                     tableHtml += `
                         <tr>
-                            <td><strong>${symbol}</strong></td>
+                            <td><strong>${rec.symbol}</strong></td>
+                            <td>$${rec.current_price ? rec.current_price.toFixed(2) : 'N/A'}</td>
                             <td>
-                                <button class="btn" style="background: #3498db; color: white; padding: 4px 8px; font-size: 0.8em;" onclick="analyzeSymbol('${symbol}')">Analyze</button>
-                                <button class="btn" style="background: #e74c3c; color: white; padding: 4px 8px; font-size: 0.8em;" onclick="removeFromWatchlist('${symbol}')">Remove</button>
+                                <span class="recommendation-badge ${actionClass}">
+                                    ${rec.action || 'HOLD'}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="${confidenceClass}">
+                                    ${rec.confidence ? rec.confidence.toFixed(1) : 'N/A'}%
+                                </span>
+                            </td>
+                            <td>$${rec.position_size ? rec.position_size.toFixed(2) : 'N/A'}</td>
+                            <td>$${rec.stop_loss ? rec.stop_loss.toFixed(2) : 'N/A'}</td>
+                            <td>$${rec.take_profit ? rec.take_profit.toFixed(2) : 'N/A'}</td>
+                            <td>
+                                <button class="btn" style="background: #3498db; color: white; padding: 4px 8px; font-size: 0.8em;" onclick="analyzeSymbol('${rec.symbol}')">Details</button>
+                                <button class="btn" style="background: #e74c3c; color: white; padding: 4px 8px; font-size: 0.8em;" onclick="removeFromWatchlist('${rec.symbol}')">Remove</button>
                             </td>
                         </tr>
                     `;
@@ -694,6 +759,13 @@
             } catch (error) {
                 document.getElementById('watchlist-table').innerHTML = `<div class="error">Error loading watchlist</div>`;
             }
+        }
+
+        function getConfidenceClass(confidence) {
+            if (!confidence) return 'confidence-low';
+            if (confidence >= 70) return 'confidence-high';
+            if (confidence >= 40) return 'confidence-medium';
+            return 'confidence-low';
         }
 
         async function refreshMarketMovers() {
