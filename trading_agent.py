@@ -11,6 +11,7 @@ from config import Config
 from data_provider import MarketDataProvider
 from trading_strategy import TradingStrategy
 from portfolio_manager import PortfolioManager
+from stock_screener import StockScreener
 
 class TradingAgent:
     """
@@ -25,6 +26,7 @@ class TradingAgent:
         self.data_provider = MarketDataProvider()
         self.trading_strategy = TradingStrategy(self.data_provider)
         self.portfolio_manager = PortfolioManager(self.data_provider)
+        self.stock_screener = StockScreener(self.data_provider)
         
         # Agent state
         self.is_running = False
@@ -34,6 +36,8 @@ class TradingAgent:
         
         # Watchlist for monitoring
         self.watchlist = self._get_default_watchlist()
+        self.auto_watchlist_enabled = True  # Enable automatic stock picking
+        self.last_watchlist_update = datetime.min
         self.recommendations = {}
         
         self.logger.info("Trading Agent initialized successfully")
@@ -140,6 +144,10 @@ class TradingAgent:
             if self.portfolio_manager.is_end_of_day():
                 self.portfolio_manager.liquidate_all_positions("End of day")
                 return
+            
+            # Update smart watchlist periodically
+            if self.auto_watchlist_enabled:
+                self._check_watchlist_update()
             
             # Scan watchlist for new opportunities
             self._scan_watchlist()
@@ -268,18 +276,22 @@ class TradingAgent:
         # Clear old recommendations
         self.recommendations.clear()
         
-        # Update watchlist with current market movers
-        try:
-            movers = self.data_provider.get_market_movers(50)
-            top_movers = [m['symbol'] for m in movers[:20]]
-            
-            # Merge with default watchlist
-            self.watchlist = list(set(self._get_default_watchlist() + top_movers))
-            
-            self.logger.info(f"Updated watchlist with {len(self.watchlist)} symbols")
-            
-        except Exception as e:
-            self.logger.error(f"Error updating watchlist: {e}")
+        # Update watchlist automatically if enabled
+        if self.auto_watchlist_enabled:
+            self._update_smart_watchlist()
+        else:
+            # Update watchlist with current market movers
+            try:
+                movers = self.data_provider.get_market_movers(50)
+                top_movers = [m['symbol'] for m in movers[:20]]
+                
+                # Merge with default watchlist
+                self.watchlist = list(set(self._get_default_watchlist() + top_movers))
+                
+                self.logger.info(f"Updated watchlist with {len(self.watchlist)} symbols")
+                
+            except Exception as e:
+                self.logger.error(f"Error updating watchlist: {e}")
     
     def _daily_shutdown(self):
         """Daily shutdown routine"""
@@ -364,6 +376,80 @@ class TradingAgent:
         except Exception as e:
             self.logger.error(f"Error analyzing {symbol}: {e}")
             return {}
+    
+    def _update_smart_watchlist(self):
+        """Update watchlist using intelligent stock screening"""
+        try:
+            self.logger.info("Updating smart watchlist...")
+            
+            # Get smart watchlist from screener
+            smart_watchlist = self.stock_screener.get_smart_watchlist(size=30)
+            
+            if smart_watchlist:
+                self.watchlist = smart_watchlist
+                self.last_watchlist_update = datetime.now()
+                self.logger.info(f"Smart watchlist updated with {len(self.watchlist)} stocks: {self.watchlist[:10]}...")
+            else:
+                self.logger.warning("Smart watchlist generation failed, keeping current watchlist")
+                
+        except Exception as e:
+            self.logger.error(f"Error updating smart watchlist: {e}")
+            # Fallback to default watchlist
+            self.watchlist = self._get_default_watchlist()
+    
+    def _check_watchlist_update(self):
+        """Check if watchlist needs updating during trading"""
+        now = datetime.now()
+        
+        # Update watchlist every 2 hours during market hours
+        hours_since_update = (now - self.last_watchlist_update).total_seconds() / 3600
+        
+        if hours_since_update >= 2:
+            self.logger.info("Periodic watchlist update due")
+            
+            # Get current momentum stocks for quick updates
+            try:
+                momentum_stocks = self.stock_screener.screen_stocks(max_stocks=15, screen_type='momentum')
+                breakout_stocks = self.stock_screener.screen_stocks(max_stocks=10, screen_type='breakout')
+                
+                # Add new opportunities to existing watchlist
+                new_stocks = []
+                for stock in momentum_stocks + breakout_stocks:
+                    if stock not in self.watchlist:
+                        new_stocks.append(stock)
+                
+                if new_stocks:
+                    # Add new stocks, but limit total watchlist size
+                    self.watchlist.extend(new_stocks[:10])
+                    self.watchlist = self.watchlist[:40]  # Keep max 40 stocks
+                    
+                    self.logger.info(f"Added {len(new_stocks[:10])} new stocks to watchlist: {new_stocks[:10]}")
+                
+                self.last_watchlist_update = now
+                
+            except Exception as e:
+                self.logger.error(f"Error in periodic watchlist update: {e}")
+    
+    def enable_auto_watchlist(self, enabled: bool = True):
+        """Enable or disable automatic watchlist generation"""
+        self.auto_watchlist_enabled = enabled
+        if enabled:
+            self.logger.info("Automatic watchlist generation enabled")
+            self._update_smart_watchlist()
+        else:
+            self.logger.info("Automatic watchlist generation disabled")
+    
+    def get_screening_options(self) -> List[str]:
+        """Get available screening options"""
+        return ['day_trading', 'breakout', 'momentum', 'high_volume']
+    
+    def screen_stocks_manual(self, screen_type: str = 'day_trading', max_stocks: int = 25) -> List[str]:
+        """Manually screen stocks with specific criteria"""
+        try:
+            return self.stock_screener.screen_stocks(max_stocks=max_stocks, screen_type=screen_type)
+        except Exception as e:
+            self.logger.error(f"Error in manual stock screening: {e}")
+            return []
 
 def main():
     """Main entry point"""

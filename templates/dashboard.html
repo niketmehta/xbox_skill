@@ -342,10 +342,32 @@
                 Watchlist
                 <button class="refresh-btn" onclick="refreshWatchlist()">Refresh</button>
             </div>
+            
+            <!-- Auto Watchlist Controls -->
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 10px 0;">
+                <h4 style="margin: 0 0 10px 0; color: #2c3e50;">🤖 Automatic Stock Picking</h4>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                    <label style="display: flex; align-items: center; gap: 5px;">
+                        <input type="checkbox" id="auto-watchlist-toggle" checked>
+                        <span>Auto-select stocks</span>
+                    </label>
+                    <select id="screening-type" style="padding: 5px; border-radius: 3px;">
+                        <option value="day_trading">Day Trading</option>
+                        <option value="momentum">Momentum</option>
+                        <option value="breakout">Breakout</option>
+                        <option value="high_volume">High Volume</option>
+                    </select>
+                    <button class="btn" style="background: #9b59b6; color: white; padding: 5px 10px; font-size: 0.9em;" onclick="screenStocks()">Screen Now</button>
+                    <span id="auto-status" style="font-size: 0.9em; color: #7f8c8d;"></span>
+                </div>
+            </div>
+            
+            <!-- Manual Add -->
             <div class="watchlist-container">
                 <input type="text" class="watchlist-input" id="symbol-input" placeholder="Enter symbol (e.g., AAPL)" maxlength="10">
-                <button class="btn" style="background: #3498db; color: white;" onclick="addToWatchlist()">Add</button>
+                <button class="btn" style="background: #3498db; color: white;" onclick="addToWatchlist()">Add Manual</button>
             </div>
+            
             <div id="watchlist-table">
                 <div class="loading">Loading watchlist...</div>
             </div>
@@ -381,6 +403,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             refreshDashboard();
             startAutoRefresh();
+            initializeAutoWatchlist();
         });
 
         function startAutoRefresh() {
@@ -906,6 +929,91 @@
                 closeAnalysis();
             }
         });
+
+        // Auto watchlist functionality
+        function initializeAutoWatchlist() {
+            // Set up event listeners
+            document.getElementById('auto-watchlist-toggle').addEventListener('change', toggleAutoWatchlist);
+            
+            // Load initial status
+            refreshAutoWatchlistStatus();
+        }
+
+        async function refreshAutoWatchlistStatus() {
+            try {
+                const response = await fetch('/api/auto-watchlist/status');
+                const data = await response.json();
+                
+                if (!data.error) {
+                    document.getElementById('auto-watchlist-toggle').checked = data.enabled;
+                    
+                    let statusText = `Auto: ${data.enabled ? 'ON' : 'OFF'}`;
+                    if (data.last_update) {
+                        const lastUpdate = new Date(data.last_update);
+                        statusText += ` | Last: ${lastUpdate.toLocaleTimeString()}`;
+                    }
+                    statusText += ` | Size: ${data.watchlist_size}`;
+                    
+                    document.getElementById('auto-status').textContent = statusText;
+                }
+            } catch (error) {
+                console.error('Error getting auto watchlist status:', error);
+            }
+        }
+
+        async function toggleAutoWatchlist() {
+            const enabled = document.getElementById('auto-watchlist-toggle').checked;
+            
+            try {
+                const response = await fetch('/api/auto-watchlist/enable', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: enabled })
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    // Revert checkbox
+                    document.getElementById('auto-watchlist-toggle').checked = !enabled;
+                } else {
+                    console.log(data.message);
+                    refreshAutoWatchlistStatus();
+                    
+                    // Refresh watchlist if enabled
+                    if (enabled) {
+                        setTimeout(refreshWatchlist, 2000);
+                    }
+                }
+            } catch (error) {
+                alert('Error toggling auto watchlist: ' + error.message);
+                document.getElementById('auto-watchlist-toggle').checked = !enabled;
+            }
+        }
+
+        async function screenStocks() {
+            const screenType = document.getElementById('screening-type').value;
+            
+            try {
+                document.getElementById('auto-status').textContent = 'Screening...';
+                
+                const response = await fetch(`/api/screen-stocks?type=${screenType}&max_stocks=25`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                } else {
+                    alert(`Found ${data.count} stocks using ${data.screen_type} screening:\n\n${data.stocks.slice(0, 10).join(', ')}${data.count > 10 ? '...' : ''}`);
+                    
+                    // Update watchlist display
+                    refreshWatchlist();
+                    refreshAutoWatchlistStatus();
+                }
+            } catch (error) {
+                alert('Error screening stocks: ' + error.message);
+            }
+        }
     </script>
 </body>
 </html>

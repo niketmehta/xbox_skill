@@ -6,6 +6,7 @@ An automated day trading system that analyzes real-time market data, recommends 
 
 ### Core Trading Capabilities
 - **Real-time Market Data**: Integration with Yahoo Finance and Alpha Vantage APIs
+- **Automatic Stock Picking**: AI-powered stock screening based on day trading criteria
 - **Multi-Strategy Analysis**: Momentum, mean reversion, breakout, and volume-based strategies
 - **Extended Hours Monitoring**: Pre-market and after-hours analysis for gap opportunities
 - **Automatic Risk Management**: Stop-loss and take-profit mechanisms
@@ -14,9 +15,11 @@ An automated day trading system that analyzes real-time market data, recommends 
 
 ### Web Dashboard
 - **Real-time Monitoring**: Live portfolio and position updates
+- **Automatic Stock Screening**: Multiple screening criteria (day trading, momentum, breakout, high volume)
+- **Smart Watchlist**: Auto-generated and periodically updated watchlists
 - **Market Analysis**: Interactive stock analysis with technical indicators
 - **Risk Metrics**: Portfolio drawdown, win rate, and profit factor tracking
-- **Watchlist Management**: Add/remove stocks for monitoring
+- **Watchlist Management**: Both automatic and manual stock selection
 - **Manual Controls**: Start/stop agent, force liquidation, and configuration
 
 ### Risk Controls
