@@ -2,6 +2,8 @@ import json
 import numpy as np
 from flask import Flask, render_template, jsonify, request, redirect, url_for
 from flask_cors import CORS
+import json
+import numpy as np
 from datetime import datetime
 import threading
 import logging
@@ -123,6 +125,24 @@ def remove_from_watchlist():
         return jsonify({'message': f'Removed {symbol} from watchlist'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+def convert_numpy_types(obj):
+    """Recursively convert numpy types to Python native types"""
+    if isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif hasattr(obj, 'item'):  # Handle numpy scalars
+        return obj.item()
+    return obj
 
 def convert_numpy_types(obj):
     """Recursively convert numpy types to Python native types"""

@@ -175,6 +175,9 @@ class MarketDataProvider:
             data['RSI'] = 100 - (100 / (1 + rs))
             data['RSI'] = data['RSI'].fillna(50)  # Fill NaN with neutral value
             
+            # Fill NaN values with forward fill then backward fill
+            data = data.ffill().bfill()
+            
             # Bollinger Bands
             data['BB_Middle'] = data['Close'].rolling(window=20).mean()
             bb_std = data['Close'].rolling(window=20).std()

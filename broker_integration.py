@@ -49,7 +49,7 @@ class AlpacaBroker:
                 'cash': float(account.cash),
                 'portfolio_value': float(account.portfolio_value),
                 'equity': float(account.equity),
-                'day_trade_count': int(getattr(account, 'day_trade_count', 0)),
+                'day_trade_count': getattr(account, 'day_trade_count', 0),
                 'pattern_day_trader': getattr(account, 'pattern_day_trader', False),
                 'trade_suspended_by_user': getattr(account, 'trade_suspended_by_user', False),
                 'trading_blocked': getattr(account, 'trading_blocked', False),
