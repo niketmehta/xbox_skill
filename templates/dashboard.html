@@ -658,8 +658,16 @@
                         </span>
                     </div>
                     <div class="metric">
-                        <span class="metric-label">Current Time:</span>
-                        <span class="metric-value">${new Date().toLocaleTimeString()}</span>
+                        <span class="metric-label">Current Time (EST):</span>
+                        <span class="metric-value">${market.current_time_est || new Date().toLocaleTimeString('en-US', {timeZone: 'America/New_York'})}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Market Hours:</span>
+                        <span class="metric-value">9:30 AM - 4:00 PM EST</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Extended Hours:</span>
+                        <span class="metric-value">4:00 AM - 8:00 PM EST</span>
                     </div>
                 `;
                 
