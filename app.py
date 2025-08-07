@@ -1,6 +1,7 @@
+import json
+import numpy as np
 from flask import Flask, render_template, jsonify, request, redirect, url_for
 from flask_cors import CORS
-import json
 from datetime import datetime
 import threading
 import logging
@@ -8,7 +9,21 @@ import logging
 from config import Config
 from trading_agent import TradingAgent
 
+# JSON encoder to handle numpy types
+class NumpyJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
 app = Flask(__name__)
+app.json_encoder = NumpyJSONEncoder
 CORS(app)
 
 # Global trading agent instance
@@ -109,6 +124,24 @@ def remove_from_watchlist():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def convert_numpy_types(obj):
+    """Recursively convert numpy types to Python native types"""
+    if isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif hasattr(obj, 'item'):  # Handle numpy scalars
+        return obj.item()
+    return obj
+
 @app.route('/api/analyze/<symbol>')
 def analyze_symbol(symbol):
     """Get detailed analysis for a symbol"""
@@ -117,8 +150,11 @@ def analyze_symbol(symbol):
     
     try:
         analysis = trading_agent.analyze_symbol(symbol.upper())
+        # Convert numpy types to JSON serializable types
+        analysis = convert_numpy_types(analysis)
         return jsonify(analysis)
     except Exception as e:
+        app.logger.error(f"Error analyzing {symbol}: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/positions')
