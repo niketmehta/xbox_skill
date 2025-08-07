@@ -124,6 +124,50 @@ def remove_from_watchlist():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/watchlist/recommendations')
+def get_watchlist_recommendations():
+    """Get recommendations for all watchlist symbols"""
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    
+    try:
+        recommendations = []
+        for symbol in trading_agent.watchlist:
+            try:
+                analysis = trading_agent.analyze_symbol(symbol)
+                if analysis and 'recommendation' in analysis:
+                    recommendation = analysis['recommendation']
+                    recommendations.append({
+                        'symbol': symbol,
+                        'current_price': analysis.get('current_price', 0),
+                        'action': recommendation.get('action', 'HOLD'),
+                        'confidence': recommendation.get('confidence', 0),
+                        'position_size': recommendation.get('position_size', 0),
+                        'stop_loss': recommendation.get('stop_loss', 0),
+                        'take_profit': recommendation.get('take_profit', 0),
+                        'timestamp': analysis.get('timestamp', datetime.now())
+                    })
+            except Exception as e:
+                app.logger.error(f"Error analyzing {symbol}: {e}")
+                # Add placeholder for failed analysis
+                recommendations.append({
+                    'symbol': symbol,
+                    'current_price': 0,
+                    'action': 'ERROR',
+                    'confidence': 0,
+                    'position_size': 0,
+                    'stop_loss': 0,
+                    'take_profit': 0,
+                    'timestamp': datetime.now()
+                })
+        
+        # Convert numpy types to JSON serializable types
+        recommendations = convert_numpy_types(recommendations)
+        return jsonify({'recommendations': recommendations})
+    except Exception as e:
+        app.logger.error(f"Error getting watchlist recommendations: {e}")
+        return jsonify({'error': str(e)}), 500
+
 def convert_numpy_types(obj):
     """Recursively convert numpy types to Python native types"""
     if isinstance(obj, dict):
