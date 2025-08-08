@@ -796,9 +796,9 @@
 
                 tableHtml += '</tbody></table>';
                 document.getElementById('watchlist-table').innerHTML = tableHtml;
-                // Reapply previous sort state if any
+                // Reapply previous sort state if any (after DOM update)
                 if (currentSort.watchlist.column !== null) {
-                    sortTable('watchlist', currentSort.watchlist.column);
+                    setTimeout(() => sortTable('watchlist', currentSort.watchlist.column), 0);
                 }
             } catch (error) {
                 document.getElementById('watchlist-table').innerHTML = `<div class="error">Error loading watchlist</div>`;
@@ -871,6 +871,27 @@
             marketMovers: { column: null, direction: 'asc' }
         };
 
+        // Load sort state from localStorage
+        function loadSortState() {
+            const saved = localStorage.getItem('dashboardSort');
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    if (parsed.positions) currentSort.positions = parsed.positions;
+                    if (parsed.watchlist) currentSort.watchlist = parsed.watchlist;
+                    if (parsed.marketMovers) currentSort.marketMovers = parsed.marketMovers;
+                } catch {}
+            }
+        }
+
+        // Save sort state to localStorage
+        function saveSortState() {
+            localStorage.setItem('dashboardSort', JSON.stringify(currentSort));
+        }
+
+        // Call on page load
+        loadSortState();
+
         function sortTable(tableType, columnIndex) {
             const table = document.querySelector(`#${tableType}-table table, #${tableType} table`);
             if (!table) return;
@@ -885,6 +906,7 @@
                 currentSort[tableType].column = columnIndex;
                 currentSort[tableType].direction = 'asc';
             }
+            saveSortState();
 
             // Sort rows
             rows.sort((a, b) => {
