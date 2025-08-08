@@ -33,6 +33,9 @@ class TradingAgent:
         self.is_market_hours = False
         self.last_scan_time = datetime.min
         self.scan_interval = 120  # seconds between scans
+        # Add after-hours scan interval and last scan time
+        self.last_after_hours_scan_time = datetime.min
+        self.after_hours_scan_interval = 120  # seconds between after-hours scans
         
         # Watchlist for monitoring
         self.watchlist = self._get_default_watchlist()
@@ -89,7 +92,7 @@ class TradingAgent:
                 schedule.run_pending()
                 
                 # Sleep before next iteration
-                time.sleep(1)
+                time.sleep(10)
                 
         except KeyboardInterrupt:
             self.logger.info("Trading Agent stopped by user")
@@ -123,8 +126,8 @@ class TradingAgent:
         """Main trading loop for market hours"""
         now = datetime.now()
         
-        # Check if it's time for a new scan
-        if (now - self.last_scan_time).seconds < self.scan_interval:
+        # Check if it's time for a new scan (use total_seconds)
+        if (now - self.last_scan_time).total_seconds() < self.scan_interval:
             return
         
         self.last_scan_time = now
@@ -244,6 +247,12 @@ class TradingAgent:
         if not self.data_provider.is_extended_hours():
             return
         
+        now = datetime.now()
+        # Throttle after-hours monitoring
+        if (now - self.last_after_hours_scan_time).total_seconds() < self.after_hours_scan_interval:
+            return
+        self.last_after_hours_scan_time = now
+        
         # Get extended hours movers
         try:
             movers = self.data_provider.get_market_movers(20)
@@ -329,9 +338,10 @@ class TradingAgent:
         recent_recommendations = {}
         for symbol, analysis in self.recommendations.items():
             recommendation = analysis.get('recommendation', {})
-            if recommendation.get('confidence', 0) > 50:
+            action = recommendation.get('action', 'HOLD')
+            if action in ['BUY', 'SELL']:
                 recent_recommendations[symbol] = {
-                    'action': recommendation.get('action'),
+                    'action': action,
                     'confidence': recommendation.get('confidence'),
                     'price': analysis.get('current_price')
                 }
