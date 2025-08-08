@@ -92,7 +92,7 @@ class TradingAgent:
                 schedule.run_pending()
                 
                 # Sleep before next iteration
-                time.sleep(5)
+                time.sleep(10)
                 
         except KeyboardInterrupt:
             self.logger.info("Trading Agent stopped by user")
