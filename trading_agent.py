@@ -32,7 +32,7 @@ class TradingAgent:
         self.is_running = False
         self.is_market_hours = False
         self.last_scan_time = datetime.min
-        self.scan_interval = 30  # seconds between scans
+        self.scan_interval = 120  # seconds between scans
         
         # Watchlist for monitoring
         self.watchlist = self._get_default_watchlist()
