@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 import logging
 from config import Config
 import pytz
+import re
 
 class MarketDataProvider:
     """
@@ -20,6 +21,14 @@ class MarketDataProvider:
         self.logger = logging.getLogger(__name__)
         self.eastern_tz = pytz.timezone('US/Eastern')
         
+    def _is_rate_limit_error(self, e):
+        msg = str(e)
+        # Common rate limit indicators
+        patterns = [
+            r"429", r"rate limit", r"too many requests", r"temporarily blocked", r"try again later"
+        ]
+        return any(re.search(p, msg, re.IGNORECASE) for p in patterns)
+
     def get_real_time_quote(self, symbol: str) -> Dict:
         """Get real-time quote for a symbol"""
         try:
@@ -47,7 +56,10 @@ class MarketDataProvider:
             return quote
             
         except Exception as e:
-            self.logger.error(f"Error getting quote for {symbol}: {e}")
+            if self._is_rate_limit_error(e):
+                self.logger.error(f"RATE LIMIT: Yahoo Finance (yfinance) rate limit hit while getting quote for {symbol}: {e}")
+            else:
+                self.logger.error(f"Error getting quote for {symbol}: {e}")
             return {}
     
     def get_intraday_data(self, symbol: str, period: str = "1d", interval: str = "5m") -> pd.DataFrame:
@@ -66,7 +78,10 @@ class MarketDataProvider:
             return data
             
         except Exception as e:
-            self.logger.error(f"Error getting intraday data for {symbol}: {e}")
+            if self._is_rate_limit_error(e):
+                self.logger.error(f"RATE LIMIT: Yahoo Finance (yfinance) rate limit hit while getting intraday data for {symbol}: {e}")
+            else:
+                self.logger.error(f"Error getting intraday data for {symbol}: {e}")
             return pd.DataFrame()
     
     def get_extended_hours_data(self, symbol: str) -> Dict:
@@ -114,7 +129,10 @@ class MarketDataProvider:
             return extended_hours
             
         except Exception as e:
-            self.logger.error(f"Error getting extended hours data for {symbol}: {e}")
+            if self._is_rate_limit_error(e):
+                self.logger.error(f"RATE LIMIT: Yahoo Finance (yfinance) rate limit hit while getting extended hours data for {symbol}: {e}")
+            else:
+                self.logger.error(f"Error getting extended hours data for {symbol}: {e}")
             return {}
     
     def get_market_movers(self, count: int = 50) -> List[Dict]:
@@ -142,7 +160,10 @@ class MarketDataProvider:
             return movers
             
         except Exception as e:
-            self.logger.error(f"Error getting market movers: {e}")
+            if self._is_rate_limit_error(e):
+                self.logger.error(f"RATE LIMIT: Yahoo Finance (yfinance) rate limit hit while getting market movers: {e}")
+            else:
+                self.logger.error(f"Error getting market movers: {e}")
             return []
     
     def _add_technical_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -220,7 +241,10 @@ class MarketDataProvider:
             return fundamentals
             
         except Exception as e:
-            self.logger.error(f"Error getting fundamentals for {symbol}: {e}")
+            if self._is_rate_limit_error(e):
+                self.logger.error(f"RATE LIMIT: Yahoo Finance (yfinance) rate limit hit while getting fundamentals for {symbol}: {e}")
+            else:
+                self.logger.error(f"Error getting fundamentals for {symbol}: {e}")
             return {}
     
     def _get_eastern_time(self) -> datetime:
