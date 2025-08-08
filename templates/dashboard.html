@@ -796,6 +796,10 @@
 
                 tableHtml += '</tbody></table>';
                 document.getElementById('watchlist-table').innerHTML = tableHtml;
+                // Reapply previous sort state if any
+                if (currentSort.watchlist.column !== null) {
+                    sortTable('watchlist', currentSort.watchlist.column);
+                }
             } catch (error) {
                 document.getElementById('watchlist-table').innerHTML = `<div class="error">Error loading watchlist</div>`;
             }

@@ -338,9 +338,10 @@ class TradingAgent:
         recent_recommendations = {}
         for symbol, analysis in self.recommendations.items():
             recommendation = analysis.get('recommendation', {})
-            if recommendation.get('confidence', 0) > 50:
+            action = recommendation.get('action', 'HOLD')
+            if action in ['BUY', 'SELL']:
                 recent_recommendations[symbol] = {
-                    'action': recommendation.get('action'),
+                    'action': action,
                     'confidence': recommendation.get('confidence'),
                     'price': analysis.get('current_price')
                 }
