@@ -393,8 +393,8 @@ class TradingAgent:
         try:
             self.logger.info("Updating smart watchlist...")
             
-            # Get smart watchlist from screener
-            smart_watchlist = self.stock_screener.get_smart_watchlist(size=30)
+            # Get smart watchlist from screener with increased size
+            smart_watchlist = self.stock_screener.get_smart_watchlist(size=60)
             
             if smart_watchlist:
                 self.watchlist = smart_watchlist
@@ -431,8 +431,8 @@ class TradingAgent:
                 
                 if new_stocks:
                     # Add new stocks, but limit total watchlist size
-                    self.watchlist.extend(new_stocks[:10])
-                    self.watchlist = self.watchlist[:40]  # Keep max 40 stocks
+                    self.watchlist.extend(new_stocks[:15])
+                    self.watchlist = self.watchlist[:80]  # Keep max 80 stocks
                     
                     self.logger.info(f"Added {len(new_stocks[:10])} new stocks to watchlist: {new_stocks[:10]}")
                 
@@ -452,9 +452,9 @@ class TradingAgent:
     
     def get_screening_options(self) -> List[str]:
         """Get available screening options"""
-        return ['day_trading', 'breakout', 'momentum', 'high_volume']
+        return ['day_trading', 'breakout', 'momentum', 'high_volume', 'high_volatility']
     
-    def screen_stocks_manual(self, screen_type: str = 'day_trading', max_stocks: int = 25) -> List[str]:
+    def screen_stocks_manual(self, screen_type: str = 'day_trading', max_stocks: int = 50) -> List[str]:
         """Manually screen stocks with specific criteria"""
         try:
             return self.stock_screener.screen_stocks(max_stocks=max_stocks, screen_type=screen_type)
