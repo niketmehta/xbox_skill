@@ -83,6 +83,8 @@ class TradingStrategy:
         # MACD analysis
         macd_bullish = (latest.get('MACD', 0) > latest.get('MACD_Signal', 0) and
                        latest.get('MACD_Histogram', 0) > 0)
+        macd_bearish = (latest.get('MACD', 0) < latest.get('MACD_Signal', 0) and
+                       latest.get('MACD_Histogram', 0) < 0)
         
         # Price momentum (5-period rate of change)
         if len(data) >= 5:
