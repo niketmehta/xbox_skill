@@ -105,10 +105,16 @@ class TradingStrategy:
         elif above_sma20:
             score += 1
             reasons.append("Above SMA20")
+        elif not above_sma20 and not above_sma50:
+            score -= 1
+            reasons.append("Below key moving averages")
         
         if macd_bullish:
             score += 2
             reasons.append("MACD bullish crossover")
+        elif macd_bearish:
+            score -= 2
+            reasons.append("MACD bearish crossover")
         
         if price_momentum > 2:
             score += 2
@@ -116,15 +122,38 @@ class TradingStrategy:
         elif price_momentum > 0.5:
             score += 1
             reasons.append(f"Positive momentum ({price_momentum:.1f}%)")
+        elif price_momentum < -2:
+            score -= 2
+            reasons.append(f"Strong negative momentum ({price_momentum:.1f}%)")
+        elif price_momentum < -0.5:
+            score -= 1
+            reasons.append(f"Negative momentum ({price_momentum:.1f}%)")
         
         if volume_spike:
             score += 1
             reasons.append("Volume spike detected")
         
+        # Additional downtrend detection for SELL signals
+        if len(data) >= 10:
+            # Check if stock is in a downtrend (lower highs and lower lows)
+            recent_highs = data['High'].tail(10)
+            recent_lows = data['Low'].tail(10)
+            
+            # Simple downtrend: last 3 highs are decreasing
+            if (recent_highs.iloc[-1] < recent_highs.iloc[-2] < recent_highs.iloc[-3] and
+                price_momentum < -1):
+                score -= 1
+                reasons.append("Downtrend detected (lower highs)")
+            
+            # Strong downtrend: price below all recent highs
+            if (current_price < recent_highs.min() and price_momentum < -2):
+                score -= 2
+                reasons.append("Strong downtrend (price below recent highs)")
+        
         # Determine signal
-        if score >= 4:
+        if score >= 2:  # Lowered from 3
             signal = 'BUY'
-        elif score <= -2:
+        elif score <= -1:  # Keep at -1
             signal = 'SELL'
         else:
             signal = 'HOLD'
@@ -194,9 +223,9 @@ class TradingStrategy:
             reasons.append("Significantly above SMA20")
         
         # Determine signal
-        if score >= 3:
+        if score >= 1:  # Lowered from 2
             signal = 'BUY'
-        elif score <= -3:
+        elif score <= -1:  # Lowered from -2
             signal = 'SELL'
         else:
             signal = 'HOLD'
@@ -264,9 +293,9 @@ class TradingStrategy:
             reasons.append("Near support level")
         
         # Determine signal
-        if score >= 3:
+        if score >= 1:  # Lowered from 2
             signal = 'BUY'
-        elif score <= -3:
+        elif score <= -1:  # Lowered from -2
             signal = 'SELL'
         else:
             signal = 'HOLD'
@@ -363,12 +392,17 @@ class TradingStrategy:
                             ('breakout', breakout), ('volume', volume)])
         
         # Determine final signal
-        if weighted_score > 0.3:
+        if weighted_score > 0.1:  # Lowered from 0.2
             final_signal = 'BUY'
-        elif weighted_score < -0.3:
+        elif weighted_score < -0.1:  # Lowered from -0.2
             final_signal = 'SELL'
         else:
             final_signal = 'HOLD'
+        
+        # Debug logging for signal generation
+        if abs(weighted_score) > 0.1:  # Log significant signals
+            self.logger.info(f"Signal generated: {final_signal} (score: {weighted_score:.3f})")
+            self.logger.info(f"Individual signals: {signals}")
         
         return {
             'signal': final_signal,

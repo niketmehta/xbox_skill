@@ -189,6 +189,21 @@
             gap: 10px;
             margin-top: 10px;
         }
+        
+        .watchlist-table-container {
+            max-height: 600px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        
+        .watchlist-table-container table {
+            font-size: 0.9em;
+        }
+        
+        .watchlist-table-container th,
+        .watchlist-table-container td {
+            padding: 6px 8px;
+        }
 
         .watchlist-input {
             flex: 1;
@@ -430,6 +445,7 @@
                         <option value="momentum">Momentum</option>
                         <option value="breakout">Breakout</option>
                         <option value="high_volume">High Volume</option>
+                        <option value="high_volatility">High Volatility</option>
                     </select>
                     <button class="btn" style="background: #9b59b6; color: white; padding: 5px 10px; font-size: 0.9em;" onclick="screenStocks()">Screen Now</button>
                     <span id="auto-status" style="font-size: 0.9em; color: #7f8c8d;"></span>
@@ -442,9 +458,11 @@
                 <button class="btn" style="background: #3498db; color: white;" onclick="addToWatchlist()">Add Manual</button>
             </div>
             
+                    <div class="watchlist-table-container">
             <div id="watchlist-table">
                 <div class="loading">Loading watchlist...</div>
             </div>
+        </div>
         </div>
 
         <!-- Market Movers -->
@@ -841,7 +859,7 @@
                         <tbody>
                 `;
 
-                data.movers.slice(0, 10).forEach(mover => {
+                data.movers.slice(0, 20).forEach(mover => {
                     tableHtml += `
                         <tr>
                             <td><strong>${mover.symbol}</strong></td>
@@ -1198,13 +1216,13 @@
             try {
                 document.getElementById('auto-status').textContent = 'Screening...';
                 
-                const response = await fetch(`/api/screen-stocks?type=${screenType}&max_stocks=25`);
+                const response = await fetch(`/api/screen-stocks?type=${screenType}&max_stocks=50`);
                 const data = await response.json();
                 
                 if (data.error) {
                     alert('Error: ' + data.error);
                 } else {
-                    alert(`Found ${data.count} stocks using ${data.screen_type} screening:\n\n${data.stocks.slice(0, 10).join(', ')}${data.count > 10 ? '...' : ''}`);
+                    alert(`Found ${data.count} stocks using ${data.screen_type} screening:\n\n${data.stocks.slice(0, 20).join(', ')}${data.count > 20 ? '...' : ''}`);
                     
                     // Update watchlist display
                     refreshWatchlist();

@@ -23,17 +23,20 @@ class StockScreener:
         self.stock_universes = {
             'sp500': self._get_sp500_symbols(),
             'nasdaq100': self._get_nasdaq100_symbols(),
+            'nyse': self._get_nyse_symbols(),
+            'small_cap': self._get_small_cap_symbols(),
             'high_volume': self._get_high_volume_stocks(),
-            'popular_day_trading': self._get_popular_day_trading_stocks()
+            'popular_day_trading': self._get_popular_day_trading_stocks(),
+            'high_volatility': self._get_high_volatility_stocks()
         }
     
-    def screen_stocks(self, max_stocks: int = 50, screen_type: str = 'day_trading') -> List[str]:
+    def screen_stocks(self, max_stocks: int = 80, screen_type: str = 'day_trading') -> List[str]:
         """
-        Screen stocks automatically based on day trading criteria
+        Screen stocks automatically based on day trading criteria with increased risk and diversity
         
         Args:
-            max_stocks: Maximum number of stocks to return
-            screen_type: Type of screening ('day_trading', 'breakout', 'momentum', 'high_volume')
+            max_stocks: Maximum number of stocks to return (default: 80)
+            screen_type: Type of screening ('day_trading', 'breakout', 'momentum', 'high_volume', 'high_volatility')
         """
         
         self.logger.info(f"Starting automatic stock screening: {screen_type}")
@@ -46,17 +49,22 @@ class StockScreener:
             return self._screen_momentum_stocks(max_stocks)
         elif screen_type == 'high_volume':
             return self._screen_high_volume_stocks(max_stocks)
+        elif screen_type == 'high_volatility':
+            return self._screen_high_volatility_stocks(max_stocks)
         else:
             return self._screen_day_trading_stocks(max_stocks)
     
     def _screen_day_trading_stocks(self, max_stocks: int) -> List[str]:
-        """Screen for optimal day trading stocks"""
+        """Screen for optimal day trading stocks with increased risk and diversity"""
         
-        # Combine multiple stock universes
+        # Combine multiple stock universes with more diversity
         candidate_symbols = list(set(
             self.stock_universes['popular_day_trading'] +
-            self.stock_universes['high_volume'][:30] +
-            self._get_current_market_movers(20)
+            self.stock_universes['high_volume'][:40] +
+            self.stock_universes['nyse'][:50] +
+            self.stock_universes['small_cap'][:60] +
+            self.stock_universes['high_volatility'][:30] +
+            self._get_current_market_movers(30)
         ))
         
         # Screen criteria for day trading
@@ -90,6 +98,50 @@ class StockScreener:
         self.logger.info(f"Selected {len(selected_symbols)} stocks for day trading")
         
         return selected_symbols
+    
+    def _evaluate_volatility_stock(self, symbol: str) -> Optional[Dict]:
+        """Evaluate if a stock has high volatility suitable for aggressive trading"""
+        
+        try:
+            # Get recent data
+            ticker = yf.Ticker(symbol)
+            
+            # Get more data for volatility calculation
+            data = ticker.history(period="30d", interval="1d")
+            
+            if len(data) < 20:
+                return None
+            
+            # Calculate volatility metrics
+            daily_returns = data['Close'].pct_change().dropna()
+            volatility = daily_returns.std() * np.sqrt(252) * 100  # Annualized volatility
+            
+            # Calculate ATR for intraday volatility
+            high_low = data['High'] - data['Low']
+            high_close = np.abs(data['High'] - data['Close'].shift())
+            low_close = np.abs(data['Low'] - data['Close'].shift())
+            
+            true_range = np.maximum(high_low, np.maximum(high_close, low_close))
+            atr = true_range.rolling(window=14).mean().iloc[-1]
+            atr_percent = (atr / data['Close'].iloc[-1]) * 100
+            
+            # High volatility criteria
+            high_volatility = (
+                volatility > 40 or  # High annualized volatility
+                atr_percent > 5 or   # High intraday range
+                abs(daily_returns.iloc[-1]) > 0.05  # Recent large move
+            )
+            
+            return {
+                'high_volatility': high_volatility,
+                'volatility': volatility,
+                'atr_percent': atr_percent,
+                'current_price': data['Close'].iloc[-1]
+            }
+            
+        except Exception as e:
+            self.logger.warning(f"Error evaluating volatility for {symbol}: {e}")
+            return None
     
     def _evaluate_day_trading_stock(self, symbol: str) -> Optional[Dict]:
         """Evaluate if a stock is suitable for day trading"""
@@ -190,15 +242,17 @@ class StockScreener:
         elif metrics['volume_ratio'] > 1.2:
             score += 5
         
-        # Volatility criteria (25 points max)
-        if 2 <= metrics['daily_volatility'] <= 8:  # Sweet spot for day trading
+        # Volatility criteria (30 points max) - Increased for higher risk
+        if 3 <= metrics['daily_volatility'] <= 12:  # Higher volatility sweet spot
+            score += 25
+        elif 2 <= metrics['daily_volatility'] <= 15:
             score += 20
-        elif 1 <= metrics['daily_volatility'] <= 10:
+        elif 1 <= metrics['daily_volatility'] <= 20:
             score += 15
-        elif metrics['daily_volatility'] <= 15:
+        elif metrics['daily_volatility'] <= 25:
             score += 10
         
-        if 1 <= metrics['atr_percent'] <= 5:  # Good intraday range
+        if 1.5 <= metrics['atr_percent'] <= 8:  # Higher intraday range
             score += 5
         
         # Price criteria (20 points max)
@@ -212,13 +266,15 @@ class StockScreener:
         if metrics['price_range_20d'] > 15:  # Good 20-day range
             score += 5
         
-        # Market cap criteria (15 points max)
+        # Market cap criteria (15 points max) - Include more small caps
         if metrics['market_cap'] > 1e9:  # > $1B market cap
-            score += 15
+            score += 12
         elif metrics['market_cap'] > 100e6:  # > $100M market cap
+            score += 15
+        elif metrics['market_cap'] > 50e6:  # > $50M market cap
             score += 10
         elif metrics['market_cap'] > 0:
-            score += 5
+            score += 8
         
         # Momentum criteria (10 points max)
         if abs(metrics['price_5d_change']) > 2:  # Some recent movement
@@ -324,6 +380,49 @@ class StockScreener:
         """Screen for high volume stocks"""
         return self.stock_universes['high_volume'][:max_stocks]
     
+    def _screen_high_volatility_stocks(self, max_stocks: int) -> List[str]:
+        """Screen for high volatility stocks"""
+        try:
+            # Combine high volatility universe with additional screening
+            candidate_symbols = list(set(
+                self.stock_universes['high_volatility'] +
+                self.stock_universes['small_cap'][:30] +
+                self._get_current_market_movers(20)
+            ))
+            
+            high_volatility_stocks = []
+            
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                future_to_symbol = {
+                    executor.submit(self._evaluate_volatility_stock, symbol): symbol 
+                    for symbol in candidate_symbols[:80]
+                }
+                
+                for future in as_completed(future_to_symbol):
+                    symbol = future_to_symbol[future]
+                    try:
+                        result = future.result(timeout=10)
+                        if result and result['high_volatility']:
+                            high_volatility_stocks.append({
+                                'symbol': symbol,
+                                'volatility': result['volatility']
+                            })
+                    except Exception as e:
+                        self.logger.warning(f"Error screening {symbol} for volatility: {e}")
+            
+            # Sort by volatility and return top stocks
+            high_volatility_stocks.sort(key=lambda x: x['volatility'], reverse=True)
+            
+            selected_symbols = [stock['symbol'] for stock in high_volatility_stocks[:max_stocks]]
+            
+            self.logger.info(f"Selected {len(selected_symbols)} high volatility stocks")
+            
+            return selected_symbols
+            
+        except Exception as e:
+            self.logger.error(f"Error in high volatility screening: {e}")
+            return self.stock_universes['high_volatility'][:max_stocks]
+    
     def _get_current_market_movers(self, count: int) -> List[str]:
         """Get current market movers"""
         try:
@@ -361,6 +460,42 @@ class StockScreener:
         ]
         return nasdaq100_symbols
     
+    def _get_nyse_symbols(self) -> List[str]:
+        """Get NYSE symbols"""
+        nyse_symbols = [
+            'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'GOOG', 'TSLA', 'META', 'NVDA',
+            'BRK-B', 'UNH', 'JNJ', 'JPM', 'V', 'PG', 'XOM', 'HD', 'CVX',
+            'MA', 'BAC', 'ABBV', 'PFE', 'AVGO', 'KO', 'LLY', 'PEP', 'TMO',
+            'COST', 'WMT', 'DIS', 'ABT', 'DHR', 'ACN', 'VZ', 'ADBE', 'NEE',
+            'CRM', 'NFLX', 'TXN', 'CMCSA', 'RTX', 'NKE', 'QCOM', 'T', 'BMY',
+            'UPS', 'PM', 'LOW', 'ORCL', 'HON', 'IBM', 'AMGN', 'SBUX', 'CAT',
+            'GE', 'MDLZ', 'AMT', 'BA', 'AXP', 'BLK', 'DE', 'MMM', 'AMD'
+        ]
+        return nyse_symbols
+    
+    def _get_small_cap_symbols(self) -> List[str]:
+        """Get small cap symbols"""
+        small_cap_symbols = [
+            'PLTR', 'RBLX', 'HOOD', 'COIN', 'RIVN', 'LCID', 'NIO', 'XPEV',
+            'LI', 'BYND', 'SNAP', 'PINS', 'TWTR', 'UBER', 'LYFT', 'DASH',
+            'ABNB', 'SNOW', 'CRWD', 'NET', 'ZM', 'DOCU', 'TEAM', 'OKTA',
+            'MDB', 'TWLO', 'SQ', 'PYPL', 'SHOP', 'ROKU', 'PTON', 'ZM',
+            'AMC', 'GME', 'BBBY', 'EXPR', 'NAKD', 'SNDL', 'TLRY', 'ACB',
+            'CGC', 'HEXO', 'APHA', 'CRON', 'OGI', 'VFF', 'GTBIF', 'TCNNF',
+            'JUSHF', 'MMNFF', 'CURLF', 'GRWG', 'HYFM', 'SMG', 'IIPR'
+        ]
+        return small_cap_symbols
+    
+    def _get_high_volatility_stocks(self) -> List[str]:
+        """Get high volatility stocks"""
+        high_volatility_stocks = [
+            'SPY', 'QQQ', 'AAPL', 'TSLA', 'AMD', 'NVDA', 'SQQQ', 'TQQQ',
+            'IWM', 'EEM', 'XLF', 'GLD', 'SLV', 'VXX', 'UVXY', 'SPXL',
+            'AMZN', 'MSFT', 'META', 'GOOGL', 'NFLX', 'BABA', 'NIO',
+            'PLTR', 'AMC', 'GME', 'PTON', 'ZOOM', 'ROKU', 'SQ', 'DOCU'
+        ]
+        return high_volatility_stocks
+    
     def _get_high_volume_stocks(self) -> List[str]:
         """Get high volume stocks"""
         high_volume_stocks = [
@@ -383,22 +518,28 @@ class StockScreener:
         ]
         return day_trading_stocks
     
-    def get_smart_watchlist(self, size: int = 25) -> List[str]:
-        """Get a smart watchlist combining multiple screening methods"""
+    def get_smart_watchlist(self, size: int = 50) -> List[str]:
+        """Get a smart watchlist combining multiple screening methods with increased diversity"""
         
         try:
-            # Get different types of stocks
+            # Get different types of stocks with more diversity
             day_trading_stocks = self._screen_day_trading_stocks(size // 2)
             momentum_stocks = self._screen_momentum_stocks(size // 4)
             breakout_stocks = self._screen_breakout_stocks(size // 4)
+            small_cap_stocks = self.stock_universes['small_cap'][:size // 6]
+            nyse_stocks = self.stock_universes['nyse'][:size // 6]
             
             # Combine and deduplicate
-            combined_stocks = list(set(day_trading_stocks + momentum_stocks + breakout_stocks))
+            combined_stocks = list(set(
+                day_trading_stocks + momentum_stocks + breakout_stocks + 
+                small_cap_stocks + nyse_stocks
+            ))
             
-            # If not enough, add high volume stocks
+            # If not enough, add high volume and high volatility stocks
             if len(combined_stocks) < size:
                 high_volume = self._get_high_volume_stocks()
-                for stock in high_volume:
+                high_volatility = self._get_high_volatility_stocks()
+                for stock in high_volume + high_volatility:
                     if stock not in combined_stocks and len(combined_stocks) < size:
                         combined_stocks.append(stock)
             

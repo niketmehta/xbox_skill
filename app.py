@@ -376,7 +376,7 @@ def screen_stocks():
     
     try:
         screen_type = request.args.get('type', 'day_trading')
-        max_stocks = request.args.get('max_stocks', 25, type=int)
+        max_stocks = request.args.get('max_stocks', 50, type=int)
         
         screened_stocks = trading_agent.screen_stocks_manual(screen_type, max_stocks)
         
