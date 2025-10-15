@@ -140,21 +140,27 @@ def get_watchlist_recommendations():
                     # Get additional quote data for percentage change
                     quote = trading_agent.data_provider.get_real_time_quote(symbol)
                     
-                    # Calculate change percent more accurately
-                    current_price = quote.get('current_price', 0) if quote else 0
-                    previous_close = quote.get('previous_close', 0) if quote else 0
+                    # Calculate potential profit percentage (current price to target price)
+                    current_price = analysis.get('current_price', 0)
+                    take_profit_price = recommendation.get('take_profit', 0)
                     
-                    # Validate data and calculate percentage change
-                    if (current_price and previous_close and 
-                        previous_close > 0 and current_price > 0 and
+                    # Calculate potential profit percentage
+                    if (current_price and take_profit_price and 
+                        current_price > 0 and take_profit_price > 0 and
                         isinstance(current_price, (int, float)) and 
-                        isinstance(previous_close, (int, float))):
-                        change_percent = ((current_price - previous_close) / previous_close) * 100
-                        app.logger.debug(f"{symbol}: current_price={current_price}, previous_close={previous_close}, change_percent={change_percent}")
+                        isinstance(take_profit_price, (int, float))):
+                        # Calculate percentage gain from current price to target price
+                        change_percent = ((take_profit_price - current_price) / current_price) * 100
+                        app.logger.debug(f"{symbol}: current_price={current_price}, take_profit={take_profit_price}, profit_percent={change_percent}")
+                    elif current_price and current_price > 0:
+                        # If we have current price but no target, show 0% potential profit
+                        change_percent = 0
+                        app.logger.debug(f"{symbol}: No target price available, showing 0% potential profit")
                     else:
-                        # Fallback to quote's change_percent if available
+                        # Fallback to daily change if no current price available
+                        quote = trading_agent.data_provider.get_real_time_quote(symbol)
                         change_percent = quote.get('change_percent', 0) if quote else 0
-                        app.logger.warning(f"{symbol}: Invalid price data - current_price={current_price}, previous_close={previous_close}, using fallback change_percent={change_percent}")
+                        app.logger.warning(f"{symbol}: No current price available, using daily change={change_percent}")
                     
                     recommendations.append({
                         'symbol': symbol,
@@ -173,7 +179,7 @@ def get_watchlist_recommendations():
                 recommendations.append({
                     'symbol': symbol,
                     'current_price': 0,
-                    'change_percent': 0,
+                    'change_percent': 0,  # This will be 0 for error cases
                     'action': 'ERROR',
                     'confidence': 0,
                     'position_size': 0,
