@@ -777,7 +777,7 @@
                             <tr>
                                 <th onclick="sortTable('watchlist', 0)" style="cursor: pointer; user-select: none;">Symbol</th>
                                 <th onclick="sortTable('watchlist', 1)" style="cursor: pointer; user-select: none;">Price</th>
-                                <th onclick="sortTable('watchlist', 2)" style="cursor: pointer; user-select: none;">Change %</th>
+                                <th onclick="sortTable('watchlist', 2)" style="cursor: pointer; user-select: none;" title="Potential profit percentage from current price to target price">Profit %</th>
                                 <th onclick="sortTable('watchlist', 3)" style="cursor: pointer; user-select: none;">Recommendation</th>
                                 <th onclick="sortTable('watchlist', 4)" style="cursor: pointer; user-select: none;">Confidence</th>
                                 <th onclick="sortTable('watchlist', 5)" style="cursor: pointer; user-select: none;">Position Size</th>
@@ -792,14 +792,15 @@
                 data.recommendations.forEach(rec => {
                     const actionClass = rec.action ? `recommendation-${rec.action.toLowerCase()}` : 'recommendation-hold';
                     const confidenceClass = getConfidenceClass(rec.confidence);
-                    const changePercent = rec.change_percent || 0;
+                    const profitPercent = rec.change_percent || 0;
+                    const hasTargetPrice = rec.take_profit && rec.take_profit > 0;
                     
                     tableHtml += `
                         <tr>
                             <td><strong>${rec.symbol}</strong></td>
                             <td>$${rec.current_price ? rec.current_price.toFixed(2) : 'N/A'}</td>
-                            <td class="${changePercent >= 0 ? 'positive' : 'negative'}">
-                                ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%
+                            <td class="${profitPercent >= 0 ? 'positive' : 'negative'}" title="${hasTargetPrice ? 'Potential profit to target price' : 'No target price set'}">
+                                ${hasTargetPrice ? (profitPercent >= 0 ? '+' : '') + profitPercent.toFixed(2) + '%' : 'N/A'}
                             </td>
                             <td>
                                 <span class="recommendation-badge ${actionClass}">

@@ -139,7 +139,28 @@ def get_watchlist_recommendations():
                     recommendation = analysis['recommendation']
                     # Get additional quote data for percentage change
                     quote = trading_agent.data_provider.get_real_time_quote(symbol)
-                    change_percent = quote.get('change_percent', 0) if quote else 0
+                    
+                    # Calculate potential profit percentage (current price to target price)
+                    current_price = analysis.get('current_price', 0)
+                    take_profit_price = recommendation.get('take_profit', 0)
+                    
+                    # Calculate potential profit percentage
+                    if (current_price and take_profit_price and 
+                        current_price > 0 and take_profit_price > 0 and
+                        isinstance(current_price, (int, float)) and 
+                        isinstance(take_profit_price, (int, float))):
+                        # Calculate percentage gain from current price to target price
+                        change_percent = ((take_profit_price - current_price) / current_price) * 100
+                        app.logger.debug(f"{symbol}: current_price={current_price}, take_profit={take_profit_price}, profit_percent={change_percent}")
+                    elif current_price and current_price > 0:
+                        # If we have current price but no target, show 0% potential profit
+                        change_percent = 0
+                        app.logger.debug(f"{symbol}: No target price available, showing 0% potential profit")
+                    else:
+                        # Fallback to daily change if no current price available
+                        quote = trading_agent.data_provider.get_real_time_quote(symbol)
+                        change_percent = quote.get('change_percent', 0) if quote else 0
+                        app.logger.warning(f"{symbol}: No current price available, using daily change={change_percent}")
                     
                     recommendations.append({
                         'symbol': symbol,
@@ -158,7 +179,7 @@ def get_watchlist_recommendations():
                 recommendations.append({
                     'symbol': symbol,
                     'current_price': 0,
-                    'change_percent': 0,
+                    'change_percent': 0,  # This will be 0 for error cases
                     'action': 'ERROR',
                     'confidence': 0,
                     'position_size': 0,
@@ -441,5 +462,5 @@ if __name__ == '__main__':
     app.run(
         host=config.FLASK_HOST,
         port=config.FLASK_PORT,
-        debug=config.FLASK_DEBUG
+        debug=False  # Disable debug mode to avoid PIN prompt
     )

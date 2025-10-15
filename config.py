@@ -38,4 +38,4 @@ class Config:
     # Flask Settings
     FLASK_HOST = '0.0.0.0'
     FLASK_PORT = 5001
-    FLASK_DEBUG = True
+    FLASK_DEBUG = False
