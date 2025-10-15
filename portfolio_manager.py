@@ -36,6 +36,16 @@ class Position:
         else:  # SHORT
             self.unrealized_pnl = (self.entry_price - current_price) * self.quantity
     
+    def get_percentage_gain_loss(self) -> float:
+        """Calculate percentage gain or loss for the position"""
+        if self.entry_price == 0:
+            return 0.0
+        
+        if self.position_type == 'LONG':
+            return ((self.current_price - self.entry_price) / self.entry_price) * 100
+        else:  # SHORT
+            return ((self.entry_price - self.current_price) / self.entry_price) * 100
+    
     def get_market_value(self) -> float:
         """Get current market value of position"""
         return self.current_price * abs(self.quantity)
@@ -72,6 +82,7 @@ class Position:
             'stop_loss': self.stop_loss,
             'take_profit': self.take_profit,
             'unrealized_pnl': self.unrealized_pnl,
+            'percentage_gain_loss': self.get_percentage_gain_loss(),
             'market_value': self.get_market_value(),
             'is_open': self.is_open
         }
