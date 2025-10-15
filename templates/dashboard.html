@@ -719,15 +719,17 @@
                                 <th onclick="sortTable('positions', 2)" style="cursor: pointer; user-select: none;">Entry Price</th>
                                 <th onclick="sortTable('positions', 3)" style="cursor: pointer; user-select: none;">Current Price</th>
                                 <th onclick="sortTable('positions', 4)" style="cursor: pointer; user-select: none;">P&L</th>
-                                <th onclick="sortTable('positions', 5)" style="cursor: pointer; user-select: none;">Market Value</th>
-                                <th onclick="sortTable('positions', 6)" style="cursor: pointer; user-select: none;">Stop Loss</th>
-                                <th onclick="sortTable('positions', 7)" style="cursor: pointer; user-select: none;">Take Profit</th>
+                                <th onclick="sortTable('positions', 5)" style="cursor: pointer; user-select: none;">P&L %</th>
+                                <th onclick="sortTable('positions', 6)" style="cursor: pointer; user-select: none;">Market Value</th>
+                                <th onclick="sortTable('positions', 7)" style="cursor: pointer; user-select: none;">Stop Loss</th>
+                                <th onclick="sortTable('positions', 8)" style="cursor: pointer; user-select: none;">Take Profit</th>
                             </tr>
                         </thead>
                         <tbody>
                 `;
 
                 data.positions.forEach(pos => {
+                    const percentageGainLoss = pos.percentage_gain_loss || 0;
                     tableHtml += `
                         <tr>
                             <td><strong>${pos.symbol}</strong></td>
@@ -736,6 +738,9 @@
                             <td>$${pos.current_price.toFixed(2)}</td>
                             <td class="${pos.unrealized_pnl >= 0 ? 'positive' : 'negative'}">
                                 $${pos.unrealized_pnl.toFixed(2)}
+                            </td>
+                            <td class="${percentageGainLoss >= 0 ? 'positive' : 'negative'}">
+                                ${percentageGainLoss >= 0 ? '+' : ''}${percentageGainLoss.toFixed(2)}%
                             </td>
                             <td>$${pos.market_value.toFixed(2)}</td>
                             <td>${pos.stop_loss ? '$' + pos.stop_loss.toFixed(2) : '-'}</td>
@@ -772,12 +777,13 @@
                             <tr>
                                 <th onclick="sortTable('watchlist', 0)" style="cursor: pointer; user-select: none;">Symbol</th>
                                 <th onclick="sortTable('watchlist', 1)" style="cursor: pointer; user-select: none;">Price</th>
-                                <th onclick="sortTable('watchlist', 2)" style="cursor: pointer; user-select: none;">Recommendation</th>
-                                <th onclick="sortTable('watchlist', 3)" style="cursor: pointer; user-select: none;">Confidence</th>
-                                <th onclick="sortTable('watchlist', 4)" style="cursor: pointer; user-select: none;">Position Size</th>
-                                <th onclick="sortTable('watchlist', 5)" style="cursor: pointer; user-select: none;">Stop Loss</th>
-                                <th onclick="sortTable('watchlist', 6)" style="cursor: pointer; user-select: none;">Take Profit</th>
-                                <th onclick="sortTable('watchlist', 7)" style="cursor: pointer; user-select: none;">Actions</th>
+                                <th onclick="sortTable('watchlist', 2)" style="cursor: pointer; user-select: none;">Change %</th>
+                                <th onclick="sortTable('watchlist', 3)" style="cursor: pointer; user-select: none;">Recommendation</th>
+                                <th onclick="sortTable('watchlist', 4)" style="cursor: pointer; user-select: none;">Confidence</th>
+                                <th onclick="sortTable('watchlist', 5)" style="cursor: pointer; user-select: none;">Position Size</th>
+                                <th onclick="sortTable('watchlist', 6)" style="cursor: pointer; user-select: none;">Stop Loss</th>
+                                <th onclick="sortTable('watchlist', 7)" style="cursor: pointer; user-select: none;">Take Profit</th>
+                                <th onclick="sortTable('watchlist', 8)" style="cursor: pointer; user-select: none;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -786,11 +792,15 @@
                 data.recommendations.forEach(rec => {
                     const actionClass = rec.action ? `recommendation-${rec.action.toLowerCase()}` : 'recommendation-hold';
                     const confidenceClass = getConfidenceClass(rec.confidence);
+                    const changePercent = rec.change_percent || 0;
                     
                     tableHtml += `
                         <tr>
                             <td><strong>${rec.symbol}</strong></td>
                             <td>$${rec.current_price ? rec.current_price.toFixed(2) : 'N/A'}</td>
+                            <td class="${changePercent >= 0 ? 'positive' : 'negative'}">
+                                ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%
+                            </td>
                             <td>
                                 <span class="recommendation-badge ${actionClass}">
                                     ${rec.action || 'HOLD'}

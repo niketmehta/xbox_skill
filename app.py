@@ -137,9 +137,14 @@ def get_watchlist_recommendations():
                 analysis = trading_agent.analyze_symbol(symbol)
                 if analysis and 'recommendation' in analysis:
                     recommendation = analysis['recommendation']
+                    # Get additional quote data for percentage change
+                    quote = trading_agent.data_provider.get_real_time_quote(symbol)
+                    change_percent = quote.get('change_percent', 0) if quote else 0
+                    
                     recommendations.append({
                         'symbol': symbol,
                         'current_price': analysis.get('current_price', 0),
+                        'change_percent': change_percent,
                         'action': recommendation.get('action', 'HOLD'),
                         'confidence': recommendation.get('confidence', 0),
                         'position_size': recommendation.get('position_size', 0),
@@ -153,6 +158,7 @@ def get_watchlist_recommendations():
                 recommendations.append({
                     'symbol': symbol,
                     'current_price': 0,
+                    'change_percent': 0,
                     'action': 'ERROR',
                     'confidence': 0,
                     'position_size': 0,
