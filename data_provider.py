@@ -35,16 +35,24 @@ class MarketDataProvider:
             ticker = yf.Ticker(symbol)
             info = ticker.info
             
-            # Get current price and basic data
-            current_price = info.get('currentPrice', info.get('regularMarketPrice', 0))
+            # Get current price and basic data - prioritize regular market price
+            current_price = info.get('regularMarketPrice', info.get('currentPrice', 0))
             previous_close = info.get('previousClose', 0)
+            
+            # If no regular market price, try other price fields
+            if not current_price:
+                current_price = info.get('currentPrice', info.get('ask', info.get('bid', 0)))
+            
+            # Calculate change and percentage more carefully
+            change = current_price - previous_close if current_price and previous_close else 0
+            change_percent = (change / previous_close * 100) if previous_close and previous_close > 0 else 0
             
             quote = {
                 'symbol': symbol,
                 'current_price': current_price,
                 'previous_close': previous_close,
-                'change': current_price - previous_close if current_price and previous_close else 0,
-                'change_percent': ((current_price - previous_close) / previous_close * 100) if previous_close else 0,
+                'change': change,
+                'change_percent': change_percent,
                 'volume': info.get('volume', 0),
                 'avg_volume': info.get('averageVolume', 0),
                 'market_cap': info.get('marketCap', 0),

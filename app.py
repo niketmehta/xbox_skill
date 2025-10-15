@@ -139,7 +139,22 @@ def get_watchlist_recommendations():
                     recommendation = analysis['recommendation']
                     # Get additional quote data for percentage change
                     quote = trading_agent.data_provider.get_real_time_quote(symbol)
-                    change_percent = quote.get('change_percent', 0) if quote else 0
+                    
+                    # Calculate change percent more accurately
+                    current_price = quote.get('current_price', 0) if quote else 0
+                    previous_close = quote.get('previous_close', 0) if quote else 0
+                    
+                    # Validate data and calculate percentage change
+                    if (current_price and previous_close and 
+                        previous_close > 0 and current_price > 0 and
+                        isinstance(current_price, (int, float)) and 
+                        isinstance(previous_close, (int, float))):
+                        change_percent = ((current_price - previous_close) / previous_close) * 100
+                        app.logger.debug(f"{symbol}: current_price={current_price}, previous_close={previous_close}, change_percent={change_percent}")
+                    else:
+                        # Fallback to quote's change_percent if available
+                        change_percent = quote.get('change_percent', 0) if quote else 0
+                        app.logger.warning(f"{symbol}: Invalid price data - current_price={current_price}, previous_close={previous_close}, using fallback change_percent={change_percent}")
                     
                     recommendations.append({
                         'symbol': symbol,
