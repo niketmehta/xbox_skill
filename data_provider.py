@@ -193,6 +193,9 @@ class MarketDataProvider:
             data['MACD_Signal'] = data['MACD'].ewm(span=9).mean()
             data['MACD_Histogram'] = data['MACD'] - data['MACD_Signal']
             
+            # Fill NaN values with forward fill then backward fill
+            data = data.ffill().bfill()
+            
             # RSI
             delta = data['Close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
