@@ -13,7 +13,8 @@ import re
 
 class MarketDataProvider:
     """
-    Provides real-time and historical market data from multiple sources
+    Provides real-time and historical market data from multiple sources.
+    Supports intraday (day-trade), daily (swing/week), and weekly (position/month) timeframes.
     """
     
     def __init__(self):
@@ -23,36 +24,28 @@ class MarketDataProvider:
         
     def _is_rate_limit_error(self, e):
         msg = str(e)
-        # Common rate limit indicators
         patterns = [
-            r"429", r"rate limit", r"too many requests", r"temporarily blocked", r"try again later"
+            r"429", r"rate limit", r"too many requests",
+            r"temporarily blocked", r"try again later"
         ]
         return any(re.search(p, msg, re.IGNORECASE) for p in patterns)
 
+    # ── Real-time quote ─────────────────────────────────────────────
     def get_real_time_quote(self, symbol: str) -> Dict:
         """Get real-time quote for a symbol"""
         try:
             ticker = yf.Ticker(symbol)
             info = ticker.info
             
-            # Get current price and basic data - prioritize regular market price
-            current_price = info.get('regularMarketPrice', info.get('currentPrice', 0))
+            current_price = info.get('currentPrice', info.get('regularMarketPrice', 0))
             previous_close = info.get('previousClose', 0)
-            
-            # If no regular market price, try other price fields
-            if not current_price:
-                current_price = info.get('currentPrice', info.get('ask', info.get('bid', 0)))
-            
-            # Calculate change and percentage more carefully
-            change = current_price - previous_close if current_price and previous_close else 0
-            change_percent = (change / previous_close * 100) if previous_close and previous_close > 0 else 0
             
             quote = {
                 'symbol': symbol,
                 'current_price': current_price,
                 'previous_close': previous_close,
-                'change': change,
-                'change_percent': change_percent,
+                'change': current_price - previous_close if current_price and previous_close else 0,
+                'change_percent': ((current_price - previous_close) / previous_close * 100) if previous_close else 0,
                 'volume': info.get('volume', 0),
                 'avg_volume': info.get('averageVolume', 0),
                 'market_cap': info.get('marketCap', 0),
@@ -65,39 +58,89 @@ class MarketDataProvider:
             
         except Exception as e:
             if self._is_rate_limit_error(e):
-                self.logger.error(f"RATE LIMIT: Yahoo Finance (yfinance) rate limit hit while getting quote for {symbol}: {e}")
+                self.logger.error(f"RATE LIMIT: quote for {symbol}: {e}")
             else:
                 self.logger.error(f"Error getting quote for {symbol}: {e}")
             return {}
     
+    # ── Intraday data (for DAY horizon) ─────────────────────────────
     def get_intraday_data(self, symbol: str, period: str = "1d", interval: str = "5m") -> pd.DataFrame:
-        """Get intraday data for technical analysis"""
+        """Get intraday data for day-trading technical analysis"""
         try:
             ticker = yf.Ticker(symbol)
             data = ticker.history(period=period, interval=interval, prepost=True)
             
             if data.empty:
-                self.logger.warning(f"No data returned for {symbol}")
+                self.logger.warning(f"No intraday data returned for {symbol}")
                 return pd.DataFrame()
             
-            # Add technical indicators
             data = self._add_technical_indicators(data)
-            
             return data
             
         except Exception as e:
             if self._is_rate_limit_error(e):
-                self.logger.error(f"RATE LIMIT: Yahoo Finance (yfinance) rate limit hit while getting intraday data for {symbol}: {e}")
+                self.logger.error(f"RATE LIMIT: intraday data for {symbol}: {e}")
             else:
                 self.logger.error(f"Error getting intraday data for {symbol}: {e}")
             return pd.DataFrame()
     
+    # ── Daily data (for WEEK horizon / swing trading) ───────────────
+    def get_daily_data(self, symbol: str, period: str = "3mo") -> pd.DataFrame:
+        """Get daily candles for swing-trade / weekly analysis.
+        
+        Args:
+            symbol: Ticker symbol
+            period: yfinance period string (default '3mo' = 3 months)
+        """
+        try:
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(period=period, interval="1d")
+            
+            if data.empty:
+                self.logger.warning(f"No daily data returned for {symbol}")
+                return pd.DataFrame()
+            
+            data = self._add_technical_indicators(data)
+            return data
+            
+        except Exception as e:
+            if self._is_rate_limit_error(e):
+                self.logger.error(f"RATE LIMIT: daily data for {symbol}: {e}")
+            else:
+                self.logger.error(f"Error getting daily data for {symbol}: {e}")
+            return pd.DataFrame()
+    
+    # ── Weekly data (for MONTH horizon / position trading) ──────────
+    def get_weekly_data(self, symbol: str, period: str = "1y") -> pd.DataFrame:
+        """Get weekly candles for position-trade / monthly analysis.
+        
+        Args:
+            symbol: Ticker symbol
+            period: yfinance period string (default '1y' = 1 year)
+        """
+        try:
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(period=period, interval="1wk")
+            
+            if data.empty:
+                self.logger.warning(f"No weekly data returned for {symbol}")
+                return pd.DataFrame()
+            
+            data = self._add_technical_indicators(data)
+            return data
+            
+        except Exception as e:
+            if self._is_rate_limit_error(e):
+                self.logger.error(f"RATE LIMIT: weekly data for {symbol}: {e}")
+            else:
+                self.logger.error(f"Error getting weekly data for {symbol}: {e}")
+            return pd.DataFrame()
+    
+    # ── Extended-hours data ─────────────────────────────────────────
     def get_extended_hours_data(self, symbol: str) -> Dict:
         """Get pre-market and after-hours data"""
         try:
             ticker = yf.Ticker(symbol)
-            
-            # Get today's data with pre/post market
             data = ticker.history(period="1d", interval="1m", prepost=True)
             
             if data.empty:
@@ -107,7 +150,6 @@ class MarketDataProvider:
             market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
             market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
             
-            # Separate pre-market, regular, and after-hours
             premarket_data = data[data.index.time < market_open.time()]
             regular_data = data[(data.index.time >= market_open.time()) & 
                               (data.index.time <= market_close.time())]
@@ -138,15 +180,15 @@ class MarketDataProvider:
             
         except Exception as e:
             if self._is_rate_limit_error(e):
-                self.logger.error(f"RATE LIMIT: Yahoo Finance (yfinance) rate limit hit while getting extended hours data for {symbol}: {e}")
+                self.logger.error(f"RATE LIMIT: extended hours for {symbol}: {e}")
             else:
                 self.logger.error(f"Error getting extended hours data for {symbol}: {e}")
             return {}
     
+    # ── Market movers ───────────────────────────────────────────────
     def get_market_movers(self, count: int = 50) -> List[Dict]:
         """Get top market movers (gainers and losers)"""
         try:
-            # Popular day trading stocks
             symbols = [
                 'SPY', 'QQQ', 'AAPL', 'TSLA', 'AMD', 'NVDA', 'MSFT', 'GOOGL',
                 'AMZN', 'META', 'NFLX', 'BABA', 'DIS', 'V', 'JPM', 'BAC',
@@ -162,18 +204,17 @@ class MarketDataProvider:
                 if quote and quote.get('change_percent'):
                     movers.append(quote)
             
-            # Sort by absolute change percentage
             movers.sort(key=lambda x: abs(x.get('change_percent', 0)), reverse=True)
-            
             return movers
             
         except Exception as e:
             if self._is_rate_limit_error(e):
-                self.logger.error(f"RATE LIMIT: Yahoo Finance (yfinance) rate limit hit while getting market movers: {e}")
+                self.logger.error(f"RATE LIMIT: market movers: {e}")
             else:
                 self.logger.error(f"Error getting market movers: {e}")
             return []
     
+    # ── Technical indicators ────────────────────────────────────────
     def _add_technical_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
         """Add technical indicators to price data"""
         try:
@@ -198,12 +239,11 @@ class MarketDataProvider:
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             rs = gain / loss
-            # Handle division by zero and inf values
             rs = rs.fillna(0).replace([np.inf, -np.inf], 0)
             data['RSI'] = 100 - (100 / (1 + rs))
-            data['RSI'] = data['RSI'].fillna(50)  # Fill NaN with neutral value
+            data['RSI'] = data['RSI'].fillna(50)
             
-            # Fill NaN values with forward fill then backward fill
+            # Fill NaN values
             data = data.ffill().bfill()
             
             # Bollinger Bands
@@ -216,12 +256,50 @@ class MarketDataProvider:
             data['Volume_SMA'] = data['Volume'].rolling(window=20).mean()
             data['Volume_Ratio'] = data['Volume'] / data['Volume_SMA']
             
+            # ADX (Average Directional Index) – trend strength
+            data = self._add_adx(data)
+            
             return data
             
         except Exception as e:
             self.logger.error(f"Error adding technical indicators: {e}")
             return data
     
+    def _add_adx(self, data: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+        """Calculate ADX for trend-strength filtering"""
+        try:
+            high = data['High']
+            low = data['Low']
+            close = data['Close']
+            
+            plus_dm = high.diff()
+            minus_dm = -low.diff()
+            
+            plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
+            minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0.0)
+            
+            tr1 = high - low
+            tr2 = (high - close.shift()).abs()
+            tr3 = (low - close.shift()).abs()
+            true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            
+            atr = true_range.rolling(window=period).mean()
+            plus_di = 100 * (plus_dm.rolling(window=period).mean() / atr)
+            minus_di = 100 * (minus_dm.rolling(window=period).mean() / atr)
+            
+            dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di))
+            dx = dx.fillna(0).replace([np.inf, -np.inf], 0)
+            data['ADX'] = dx.rolling(window=period).mean().fillna(0)
+            data['Plus_DI'] = plus_di.fillna(0)
+            data['Minus_DI'] = minus_di.fillna(0)
+        except Exception as e:
+            self.logger.error(f"Error computing ADX: {e}")
+            data['ADX'] = 0
+            data['Plus_DI'] = 0
+            data['Minus_DI'] = 0
+        return data
+    
+    # ── Fundamentals ────────────────────────────────────────────────
     def get_stock_fundamentals(self, symbol: str) -> Dict:
         """Get basic fundamental data for a stock"""
         try:
@@ -250,47 +328,33 @@ class MarketDataProvider:
             
         except Exception as e:
             if self._is_rate_limit_error(e):
-                self.logger.error(f"RATE LIMIT: Yahoo Finance (yfinance) rate limit hit while getting fundamentals for {symbol}: {e}")
+                self.logger.error(f"RATE LIMIT: fundamentals for {symbol}: {e}")
             else:
                 self.logger.error(f"Error getting fundamentals for {symbol}: {e}")
             return {}
     
+    # ── Time helpers ────────────────────────────────────────────────
     def _get_eastern_time(self) -> datetime:
-        """Get current time in Eastern Time"""
         utc_now = datetime.now(pytz.UTC)
         return utc_now.astimezone(self.eastern_tz)
     
     def get_eastern_time_string(self) -> str:
-        """Get current Eastern Time as formatted string"""
-        eastern_time = self._get_eastern_time()
-        return eastern_time.strftime("%H:%M:%S")
+        return self._get_eastern_time().strftime("%H:%M:%S")
     
     def is_market_open(self) -> bool:
-        """Check if market is currently open (Eastern Time)"""
         now = self._get_eastern_time()
-        weekday = now.weekday()  # 0 = Monday, 6 = Sunday
-        
-        # Check if it's a weekday
-        if weekday >= 5:  # Saturday or Sunday
+        if now.weekday() >= 5:
             return False
-        
-        # Check time (Eastern Time)
         current_time = now.time()
         market_open = datetime.strptime(self.config.MARKET_OPEN, "%H:%M").time()
         market_close = datetime.strptime(self.config.MARKET_CLOSE, "%H:%M").time()
-        
         return market_open <= current_time <= market_close
     
     def is_extended_hours(self) -> bool:
-        """Check if it's extended hours trading time (Eastern Time)"""
         now = self._get_eastern_time()
-        weekday = now.weekday()
-        
-        if weekday >= 5:  # Weekend
+        if now.weekday() >= 5:
             return False
-        
         current_time = now.time()
         extended_start = datetime.strptime(self.config.EXTENDED_HOURS_START, "%H:%M").time()
         extended_end = datetime.strptime(self.config.EXTENDED_HOURS_END, "%H:%M").time()
-        
         return extended_start <= current_time <= extended_end

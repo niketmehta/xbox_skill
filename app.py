@@ -31,169 +31,11 @@ trading_agent = None
 agent_thread = None
 
 def start_trading_agent():
-    """Start the trading agent in a separate thread"""
     global trading_agent
     if trading_agent:
         trading_agent.start()
 
-@app.route('/')
-def dashboard():
-    """Main dashboard page"""
-    return render_template('dashboard.html')
-
-@app.route('/api/status')
-def get_status():
-    """Get current status of the trading agent"""
-    if not trading_agent:
-        return jsonify({'error': 'Trading agent not initialized'}), 500
-    
-    try:
-        status = trading_agent.get_status()
-        return jsonify(status)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/portfolio')
-def get_portfolio():
-    """Get portfolio summary"""
-    if not trading_agent:
-        return jsonify({'error': 'Trading agent not initialized'}), 500
-    
-    try:
-        portfolio = trading_agent.portfolio_manager.get_portfolio_summary()
-        return jsonify(portfolio)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/performance')
-def get_performance():
-    """Get performance metrics"""
-    if not trading_agent:
-        return jsonify({'error': 'Trading agent not initialized'}), 500
-    
-    try:
-        performance = trading_agent.portfolio_manager.get_performance_metrics()
-        return jsonify(performance)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/watchlist')
-def get_watchlist():
-    """Get current watchlist"""
-    if not trading_agent:
-        return jsonify({'error': 'Trading agent not initialized'}), 500
-    
-    try:
-        return jsonify({'watchlist': trading_agent.watchlist})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/watchlist/add', methods=['POST'])
-def add_to_watchlist():
-    """Add symbol to watchlist"""
-    if not trading_agent:
-        return jsonify({'error': 'Trading agent not initialized'}), 500
-    
-    data = request.get_json()
-    symbol = data.get('symbol', '').upper()
-    
-    if not symbol:
-        return jsonify({'error': 'Symbol is required'}), 400
-    
-    try:
-        trading_agent.add_to_watchlist(symbol)
-        return jsonify({'message': f'Added {symbol} to watchlist'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/watchlist/remove', methods=['POST'])
-def remove_from_watchlist():
-    """Remove symbol from watchlist"""
-    if not trading_agent:
-        return jsonify({'error': 'Trading agent not initialized'}), 500
-    
-    data = request.get_json()
-    symbol = data.get('symbol', '').upper()
-    
-    if not symbol:
-        return jsonify({'error': 'Symbol is required'}), 400
-    
-    try:
-        trading_agent.remove_from_watchlist(symbol)
-        return jsonify({'message': f'Removed {symbol} from watchlist'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/watchlist/recommendations')
-def get_watchlist_recommendations():
-    """Get recommendations for all watchlist symbols"""
-    if not trading_agent:
-        return jsonify({'error': 'Trading agent not initialized'}), 500
-    
-    try:
-        recommendations = []
-        for symbol in trading_agent.watchlist:
-            try:
-                analysis = trading_agent.analyze_symbol(symbol)
-                if analysis and 'recommendation' in analysis:
-                    recommendation = analysis['recommendation']
-                    # Get additional quote data for percentage change
-                    quote = trading_agent.data_provider.get_real_time_quote(symbol)
-                    
-                    # Calculate potential profit percentage (current price to target price)
-                    current_price = analysis.get('current_price', 0)
-                    take_profit_price = recommendation.get('take_profit', 0)
-                    
-                    # Calculate potential profit percentage
-                    if (current_price and take_profit_price and 
-                        current_price > 0 and take_profit_price > 0 and
-                        isinstance(current_price, (int, float)) and 
-                        isinstance(take_profit_price, (int, float))):
-                        # Calculate percentage gain from current price to target price
-                        change_percent = ((take_profit_price - current_price) / current_price) * 100
-                        app.logger.debug(f"{symbol}: current_price={current_price}, take_profit={take_profit_price}, profit_percent={change_percent}")
-                    elif current_price and current_price > 0:
-                        # If we have current price but no target, show 0% potential profit
-                        change_percent = 0
-                        app.logger.debug(f"{symbol}: No target price available, showing 0% potential profit")
-                    else:
-                        # Fallback to daily change if no current price available
-                        quote = trading_agent.data_provider.get_real_time_quote(symbol)
-                        change_percent = quote.get('change_percent', 0) if quote else 0
-                        app.logger.warning(f"{symbol}: No current price available, using daily change={change_percent}")
-                    
-                    recommendations.append({
-                        'symbol': symbol,
-                        'current_price': analysis.get('current_price', 0),
-                        'change_percent': change_percent,
-                        'action': recommendation.get('action', 'HOLD'),
-                        'confidence': recommendation.get('confidence', 0),
-                        'position_size': recommendation.get('position_size', 0),
-                        'stop_loss': recommendation.get('stop_loss', 0),
-                        'take_profit': recommendation.get('take_profit', 0),
-                        'timestamp': analysis.get('timestamp', datetime.now())
-                    })
-            except Exception as e:
-                app.logger.error(f"Error analyzing {symbol}: {e}")
-                # Add placeholder for failed analysis
-                recommendations.append({
-                    'symbol': symbol,
-                    'current_price': 0,
-                    'change_percent': 0,  # This will be 0 for error cases
-                    'action': 'ERROR',
-                    'confidence': 0,
-                    'position_size': 0,
-                    'stop_loss': 0,
-                    'take_profit': 0,
-                    'timestamp': datetime.now()
-                })
-        
-        # Convert numpy types to JSON serializable types
-        recommendations = convert_numpy_types(recommendations)
-        return jsonify({'recommendations': recommendations})
-    except Exception as e:
-        app.logger.error(f"Error getting watchlist recommendations: {e}")
-        return jsonify({'error': str(e)}), 500
+# ── Helpers ─────────────────────────────────────────────────────
 
 def convert_numpy_types(obj):
     """Recursively convert numpy types to Python native types"""
@@ -209,45 +51,90 @@ def convert_numpy_types(obj):
         return obj.tolist()
     elif isinstance(obj, datetime):
         return obj.isoformat()
-    elif hasattr(obj, 'item'):  # Handle numpy scalars
+    elif hasattr(obj, 'item'):
         return obj.item()
     return obj
 
-@app.route('/api/analyze/<symbol>')
-def analyze_symbol(symbol):
-    """Get detailed analysis for a symbol"""
+# ── Dashboard ───────────────────────────────────────────────────
+
+@app.route('/')
+def dashboard():
+    return render_template('dashboard.html')
+
+# ── Agent status & control ──────────────────────────────────────
+
+@app.route('/api/status')
+def get_status():
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
-    
     try:
-        analysis = trading_agent.analyze_symbol(symbol.upper())
-        # Convert numpy types to JSON serializable types
-        analysis = convert_numpy_types(analysis)
-        return jsonify(analysis)
+        status = trading_agent.get_status()
+        return jsonify(status)
     except Exception as e:
-        app.logger.error(f"Error analyzing {symbol}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/start-agent', methods=['POST'])
+def start_agent():
+    global trading_agent, agent_thread
+    if trading_agent and trading_agent.is_running:
+        return jsonify({'message': 'Trading agent is already running'})
+    try:
+        if not trading_agent:
+            trading_agent = TradingAgent()
+        if not agent_thread or not agent_thread.is_alive():
+            agent_thread = threading.Thread(target=start_trading_agent, daemon=True)
+            agent_thread.start()
+        return jsonify({'message': 'Trading agent started'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/stop-agent', methods=['POST'])
+def stop_agent():
+    global trading_agent
+    if not trading_agent:
+        return jsonify({'message': 'Trading agent is not running'})
+    try:
+        trading_agent.stop()
+        return jsonify({'message': 'Trading agent stopped'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ── Portfolio ───────────────────────────────────────────────────
+
+@app.route('/api/portfolio')
+def get_portfolio():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        portfolio = trading_agent.portfolio_manager.get_portfolio_summary()
+        return jsonify(portfolio)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/performance')
+def get_performance():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        performance = trading_agent.portfolio_manager.get_performance_metrics()
+        return jsonify(performance)
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/positions')
 def get_positions():
-    """Get current positions"""
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
-    
     try:
-        positions = []
-        for symbol, position in trading_agent.portfolio_manager.positions.items():
-            positions.append(position.to_dict())
+        positions = [pos.to_dict() for pos in trading_agent.portfolio_manager.positions.values()]
         return jsonify({'positions': positions})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/liquidate', methods=['POST'])
 def liquidate_positions():
-    """Force liquidation of all positions"""
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
-    
     try:
         trading_agent.force_liquidate()
         return jsonify({'message': 'All positions liquidated'})
@@ -256,29 +143,152 @@ def liquidate_positions():
 
 @app.route('/api/trading-history')
 def get_trading_history():
-    """Get trading history"""
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
-    
     try:
         days = request.args.get('days', 30, type=int)
         history = trading_agent.portfolio_manager.get_trading_history(days)
-        
-        # Convert DataFrame to dict for JSON serialization
         if not history.empty:
-            history_dict = history.to_dict('records')
-            return jsonify({'history': history_dict})
+            return jsonify({'history': history.to_dict('records')})
         else:
             return jsonify({'history': []})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/market-movers')
-def get_market_movers():
-    """Get current market movers"""
+# ── Returns by window (NEW) ────────────────────────────────────
+
+@app.route('/api/returns')
+def get_returns():
+    """Get realised + unrealised returns for 1D / 1W / 1M windows."""
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
-    
+    try:
+        returns = trading_agent.portfolio_manager.get_returns_by_window()
+        returns = convert_numpy_types(returns)
+        return jsonify(returns)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ── Watchlist ───────────────────────────────────────────────────
+
+@app.route('/api/watchlist')
+def get_watchlist():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        return jsonify({'watchlist': trading_agent.watchlist})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/watchlist/add', methods=['POST'])
+def add_to_watchlist():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    data = request.get_json()
+    symbol = data.get('symbol', '').upper()
+    if not symbol:
+        return jsonify({'error': 'Symbol is required'}), 400
+    try:
+        trading_agent.add_to_watchlist(symbol)
+        return jsonify({'message': f'Added {symbol} to watchlist'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/watchlist/remove', methods=['POST'])
+def remove_from_watchlist():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    data = request.get_json()
+    symbol = data.get('symbol', '').upper()
+    if not symbol:
+        return jsonify({'error': 'Symbol is required'}), 400
+    try:
+        trading_agent.remove_from_watchlist(symbol)
+        return jsonify({'message': f'Removed {symbol} from watchlist'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/watchlist/recommendations')
+def get_watchlist_recommendations():
+    """Get recommendations for all watchlist symbols (supports horizon query param)."""
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        horizon = request.args.get('horizon', 'DAY').upper()
+        if horizon not in ('DAY', 'WEEK', 'MONTH'):
+            horizon = 'DAY'
+        
+        recommendations = []
+        for symbol in trading_agent.watchlist:
+            try:
+                analysis = trading_agent.analyze_symbol(symbol, horizon=horizon)
+                if analysis and 'recommendation' in analysis:
+                    rec = analysis['recommendation']
+                    recommendations.append({
+                        'symbol': symbol,
+                        'current_price': analysis.get('current_price', 0),
+                        'action': rec.get('action', 'HOLD'),
+                        'confidence': rec.get('confidence', 0),
+                        'position_size': rec.get('position_size', 0),
+                        'stop_loss': rec.get('stop_loss', 0),
+                        'take_profit': rec.get('take_profit', 0),
+                        'horizon': horizon,
+                        'timestamp': analysis.get('timestamp', datetime.now())
+                    })
+            except Exception as e:
+                app.logger.error(f"Error analysing {symbol}: {e}")
+                recommendations.append({
+                    'symbol': symbol,
+                    'current_price': 0,
+                    'action': 'ERROR',
+                    'confidence': 0,
+                    'position_size': 0,
+                    'stop_loss': 0,
+                    'take_profit': 0,
+                    'horizon': horizon,
+                    'timestamp': datetime.now()
+                })
+        
+        recommendations = convert_numpy_types(recommendations)
+        return jsonify({'recommendations': recommendations, 'horizon': horizon})
+    except Exception as e:
+        app.logger.error(f"Error getting watchlist recommendations: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ── Analysis ────────────────────────────────────────────────────
+
+@app.route('/api/analyze/<symbol>')
+def analyze_symbol(symbol):
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        horizon = request.args.get('horizon', 'DAY').upper()
+        analysis = trading_agent.analyze_symbol(symbol.upper(), horizon=horizon)
+        analysis = convert_numpy_types(analysis)
+        return jsonify(analysis)
+    except Exception as e:
+        app.logger.error(f"Error analysing {symbol}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/analyze/<symbol>/all')
+def analyze_symbol_all(symbol):
+    """Analyse a symbol across all three horizons."""
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        analysis = trading_agent.analyze_symbol_all_horizons(symbol.upper())
+        analysis = convert_numpy_types(analysis)
+        return jsonify(analysis)
+    except Exception as e:
+        app.logger.error(f"Error analysing {symbol} (all horizons): {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ── Market movers ───────────────────────────────────────────────
+
+@app.route('/api/market-movers')
+def get_market_movers():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
     try:
         count = request.args.get('count', 20, type=int)
         movers = trading_agent.data_provider.get_market_movers(count)
@@ -286,52 +296,21 @@ def get_market_movers():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/start-agent', methods=['POST'])
-def start_agent():
-    """Start the trading agent"""
-    global trading_agent, agent_thread
-    
-    if trading_agent and trading_agent.is_running:
-        return jsonify({'message': 'Trading agent is already running'})
-    
-    try:
-        # Initialize trading agent if not exists
-        if not trading_agent:
-            trading_agent = TradingAgent()
-        
-        # Start agent in separate thread
-        if not agent_thread or not agent_thread.is_alive():
-            agent_thread = threading.Thread(target=start_trading_agent, daemon=True)
-            agent_thread.start()
-        
-        return jsonify({'message': 'Trading agent started'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/stop-agent', methods=['POST'])
-def stop_agent():
-    """Stop the trading agent"""
-    global trading_agent
-    
-    if not trading_agent:
-        return jsonify({'message': 'Trading agent is not running'})
-    
-    try:
-        trading_agent.stop()
-        return jsonify({'message': 'Trading agent stopped'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+# ── Config ──────────────────────────────────────────────────────
 
 @app.route('/api/config')
 def get_config():
-    """Get current configuration"""
     try:
         config = Config()
         config_dict = {
             'MAX_PORTFOLIO_VALUE': config.MAX_PORTFOLIO_VALUE,
             'MAX_POSITION_SIZE': config.MAX_POSITION_SIZE,
-            'STOP_LOSS_PERCENTAGE': config.STOP_LOSS_PERCENTAGE,
-            'TAKE_PROFIT_PERCENTAGE': config.TAKE_PROFIT_PERCENTAGE,
+            'DAY_STOP_LOSS_PCT': config.DAY_STOP_LOSS_PCT,
+            'DAY_TAKE_PROFIT_PCT': config.DAY_TAKE_PROFIT_PCT,
+            'WEEK_STOP_LOSS_PCT': config.WEEK_STOP_LOSS_PCT,
+            'WEEK_TAKE_PROFIT_PCT': config.WEEK_TAKE_PROFIT_PCT,
+            'MONTH_STOP_LOSS_PCT': config.MONTH_STOP_LOSS_PCT,
+            'MONTH_TAKE_PROFIT_PCT': config.MONTH_TAKE_PROFIT_PCT,
             'MAX_DAILY_LOSS': config.MAX_DAILY_LOSS,
             'MAX_POSITIONS': config.MAX_POSITIONS,
             'RSI_OVERSOLD': config.RSI_OVERSOLD,
@@ -342,20 +321,17 @@ def get_config():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ── Broker ──────────────────────────────────────────────────────
+
 @app.route('/api/broker/account')
 def get_broker_account():
-    """Get broker account information"""
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
-    
     try:
         if hasattr(trading_agent.portfolio_manager, 'broker'):
             account_info = trading_agent.portfolio_manager.broker.get_account_info()
             broker_connected = trading_agent.portfolio_manager.broker.is_connected()
-            return jsonify({
-                'connected': broker_connected,
-                'account_info': account_info
-            })
+            return jsonify({'connected': broker_connected, 'account_info': account_info})
         else:
             return jsonify({'connected': False, 'account_info': {}})
     except Exception as e:
@@ -363,10 +339,8 @@ def get_broker_account():
 
 @app.route('/api/broker/orders')
 def get_broker_orders():
-    """Get broker orders"""
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
-    
     try:
         if hasattr(trading_agent.portfolio_manager, 'broker'):
             orders = trading_agent.portfolio_manager.broker.get_orders(limit=50)
@@ -376,18 +350,16 @@ def get_broker_orders():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ── Auto watchlist / screening ──────────────────────────────────
+
 @app.route('/api/auto-watchlist/enable', methods=['POST'])
 def enable_auto_watchlist():
-    """Enable automatic watchlist generation"""
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
-    
     try:
         data = request.get_json() or {}
         enabled = data.get('enabled', True)
-        
         trading_agent.enable_auto_watchlist(enabled)
-        
         return jsonify({
             'message': f"Auto watchlist {'enabled' if enabled else 'disabled'}",
             'enabled': enabled
@@ -397,16 +369,12 @@ def enable_auto_watchlist():
 
 @app.route('/api/screen-stocks')
 def screen_stocks():
-    """Screen stocks with specific criteria"""
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
-    
     try:
         screen_type = request.args.get('type', 'day_trading')
-        max_stocks = request.args.get('max_stocks', 50, type=int)
-        
+        max_stocks = request.args.get('max_stocks', 25, type=int)
         screened_stocks = trading_agent.screen_stocks_manual(screen_type, max_stocks)
-        
         return jsonify({
             'screen_type': screen_type,
             'stocks': screened_stocks,
@@ -417,10 +385,8 @@ def screen_stocks():
 
 @app.route('/api/screening-options')
 def get_screening_options():
-    """Get available screening options"""
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
-    
     try:
         options = trading_agent.get_screening_options()
         return jsonify({'options': options})
@@ -429,18 +395,68 @@ def get_screening_options():
 
 @app.route('/api/auto-watchlist/status')
 def get_auto_watchlist_status():
-    """Get auto watchlist status"""
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
-    
     try:
         return jsonify({
             'enabled': trading_agent.auto_watchlist_enabled,
-            'last_update': trading_agent.last_watchlist_update.isoformat() if trading_agent.last_watchlist_update != trading_agent.last_watchlist_update.min else None,
+            'last_update': trading_agent.last_watchlist_update.isoformat()
+                if trading_agent.last_watchlist_update != trading_agent.last_watchlist_update.min else None,
             'watchlist_size': len(trading_agent.watchlist)
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ── Notifications (NEW) ────────────────────────────────────────
+
+@app.route('/api/notifications/config', methods=['GET'])
+def get_notification_config():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        ns = trading_agent.notifications
+        return jsonify({
+            'enabled': ns.is_enabled(),
+            'phone_number': ns.get_phone_number()
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/notifications/config', methods=['POST'])
+def update_notification_config():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        data = request.get_json() or {}
+        ns = trading_agent.notifications
+        
+        if 'enabled' in data:
+            ns.enable(data['enabled'])
+        if 'phone_number' in data:
+            ns.set_phone_number(data['phone_number'])
+        
+        return jsonify({
+            'message': 'Notification settings updated',
+            'enabled': ns.is_enabled(),
+            'phone_number': ns.get_phone_number()
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/notifications/test', methods=['POST'])
+def test_notification():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        success = trading_agent.notifications.send_test()
+        if success:
+            return jsonify({'message': 'Test SMS sent successfully'})
+        else:
+            return jsonify({'error': 'Failed to send test SMS. Check Twilio configuration.'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ── Error handlers ──────────────────────────────────────────────
 
 @app.errorhandler(404)
 def not_found(error):
@@ -450,17 +466,14 @@ def not_found(error):
 def internal_error(error):
     return jsonify({'error': 'Internal server error'}), 500
 
+# ── Main ────────────────────────────────────────────────────────
+
 if __name__ == '__main__':
-    # Set up logging
     logging.basicConfig(level=logging.INFO)
-    
-    # Initialize trading agent
     trading_agent = TradingAgent()
-    
-    # Start Flask app
     config = Config()
     app.run(
         host=config.FLASK_HOST,
         port=config.FLASK_PORT,
-        debug=False  # Disable debug mode to avoid PIN prompt
+        debug=config.FLASK_DEBUG
     )
