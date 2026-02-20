@@ -19,50 +19,60 @@
         /* ── Header ─────────────────────────────────────── */
         .header {
             background: rgba(30, 30, 60, 0.95);
-            border-radius: 12px;
-            padding: 20px 28px;
+            border-radius: 16px;
+            padding: 24px 32px;
             margin-bottom: 20px;
             box-shadow: 0 4px 24px rgba(0,0,0,.3);
             border: 1px solid rgba(255,255,255,.06);
         }
-        .title { font-size: 2em; font-weight: 700; color: #fff; text-align: center; }
-        .subtitle { text-align: center; color: #8e8ea0; font-size: 1em; margin-top: 4px; }
-        .controls { display: flex; justify-content: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+        .header-top { display: flex; justify-content: center; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .title { font-size: 2em; font-weight: 700; color: #fff; }
+        .mode-badge {
+            padding: 4px 12px; border-radius: 20px; font-size: .75em; font-weight: 700;
+            background: linear-gradient(135deg, #8b5cf6, #6366f1); color: #fff;
+            letter-spacing: .5px; text-transform: uppercase;
+        }
+        .subtitle { text-align: center; color: #8e8ea0; font-size: .95em; margin-top: 6px; }
+        .controls { display: flex; justify-content: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
 
         .btn {
-            padding: 9px 18px; border: none; border-radius: 6px;
+            padding: 10px 20px; border: none; border-radius: 8px;
             cursor: pointer; font-size: .95em; font-weight: 600;
             transition: all .2s ease; color: #fff;
         }
-        .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.4); }
-        .btn-start  { background: #22c55e; }
-        .btn-stop   { background: #ef4444; }
-        .btn-liquidate { background: #f59e0b; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+        .btn:active { transform: translateY(0); }
+        .btn-start  { background: linear-gradient(135deg, #22c55e, #16a34a); }
+        .btn-stop   { background: linear-gradient(135deg, #ef4444, #dc2626); }
+        .btn-liquidate { background: linear-gradient(135deg, #f59e0b, #d97706); }
 
         /* ── Grid cards ─────────────────────────────────── */
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; margin-bottom: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; margin-bottom: 20px; }
 
         .card {
             background: rgba(30, 30, 60, 0.92);
-            border-radius: 12px; padding: 20px;
+            border-radius: 14px; padding: 22px;
             box-shadow: 0 4px 18px rgba(0,0,0,.25);
             border: 1px solid rgba(255,255,255,.06);
-            transition: transform .2s ease;
+            transition: transform .2s ease, box-shadow .2s ease;
         }
-        .card:hover { transform: translateY(-3px); }
+        .card:hover { transform: translateY(-3px); box-shadow: 0 8px 28px rgba(0,0,0,.35); }
 
         .card-header {
-            font-size: 1.15em; font-weight: 700; color: #fff;
+            font-size: 1.1em; font-weight: 700; color: #fff;
             margin-bottom: 14px; padding-bottom: 10px;
             border-bottom: 2px solid #6366f1;
+            display: flex; align-items: center; gap: 8px;
         }
+        .card-header-icon { font-size: 1.2em; }
 
-        .metric { display: flex; justify-content: space-between; margin-bottom: 8px; padding: 4px 0; }
-        .metric-label { color: #8e8ea0; }
+        .metric { display: flex; justify-content: space-between; margin-bottom: 8px; padding: 5px 0; }
+        .metric-label { color: #8e8ea0; font-size: .93em; }
         .metric-value { font-weight: 700; color: #fff; }
 
         .positive { color: #22c55e; }
         .negative { color: #ef4444; }
+        .neutral  { color: #f59e0b; }
 
         .status-indicator { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
         .status-running { background: #22c55e; animation: pulse 2s infinite; }
@@ -70,19 +80,34 @@
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
         /* ── Returns cards ──────────────────────────────── */
-        .returns-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+        .returns-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
         .return-card {
-            background: rgba(40,40,80,.7); border-radius: 10px; padding: 16px; text-align: center;
-            border: 1px solid rgba(99,102,241,.25);
+            background: rgba(40,40,80,.65); border-radius: 12px; padding: 20px; text-align: center;
+            border: 1px solid rgba(99,102,241,.2);
+            transition: border-color .2s ease;
         }
-        .return-card h4 { color: #a5b4fc; font-size: .85em; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
-        .return-value { font-size: 1.6em; font-weight: 800; }
-        .return-sub { font-size: .8em; color: #8e8ea0; margin-top: 4px; }
+        .return-card:hover { border-color: rgba(99,102,241,.5); }
+        .return-card h4 { color: #a5b4fc; font-size: .82em; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1.2px; }
+        .return-value { font-size: 1.7em; font-weight: 800; }
+        .return-sub { font-size: .82em; color: #8e8ea0; margin-top: 5px; }
+
+        /* ── Market regime strip ────────────────────────── */
+        .regime-strip {
+            display: flex; align-items: center; gap: 14px; padding: 12px 20px;
+            background: rgba(40,40,80,.5); border-radius: 10px; margin-bottom: 20px;
+            border: 1px solid rgba(99,102,241,.15); flex-wrap: wrap;
+        }
+        .regime-strip .regime-label { color: #a5b4fc; font-weight: 600; font-size: .9em; }
+        .regime-strip .regime-value { font-weight: 800; font-size: 1em; }
+        .regime-low  { color: #22c55e; }
+        .regime-normal { color: #60a5fa; }
+        .regime-high { color: #f59e0b; }
+        .regime-extreme { color: #ef4444; }
 
         /* ── Tables ─────────────────────────────────────── */
         .table-container {
             background: rgba(30, 30, 60, 0.92);
-            border-radius: 12px; padding: 20px;
+            border-radius: 14px; padding: 22px;
             box-shadow: 0 4px 18px rgba(0,0,0,.25);
             border: 1px solid rgba(255,255,255,.06);
             overflow-x: auto;
@@ -90,102 +115,139 @@
 
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.06); }
-        th { background: rgba(50,50,90,.6); color: #a5b4fc; font-weight: 600; font-size: .85em; text-transform: uppercase; letter-spacing: .5px; }
+        th { background: rgba(50,50,90,.6); color: #a5b4fc; font-weight: 600; font-size: .82em; text-transform: uppercase; letter-spacing: .5px; }
+        tr:hover { background: rgba(99,102,241,.06); }
 
         /* ── Badges ─────────────────────────────────────── */
         .recommendation-badge {
-            padding: 4px 10px; border-radius: 5px; color: #fff;
+            padding: 4px 12px; border-radius: 6px; color: #fff;
             font-size: .8em; font-weight: 700; text-align: center;
             min-width: 60px; display: inline-block;
         }
-        .recommendation-buy   { background: #22c55e; }
-        .recommendation-sell  { background: #ef4444; }
-        .recommendation-hold  { background: #6b7280; }
-        .recommendation-error { background: #f59e0b; }
+        .recommendation-buy   { background: linear-gradient(135deg, #22c55e, #16a34a); }
+        .recommendation-sell  { background: linear-gradient(135deg, #ef4444, #dc2626); }
+        .recommendation-hold  { background: rgba(107,114,128,.8); }
+        .recommendation-error { background: linear-gradient(135deg, #f59e0b, #d97706); }
 
         .confidence-high   { color: #22c55e; font-weight: 700; }
         .confidence-medium { color: #f59e0b; font-weight: 700; }
         .confidence-low    { color: #ef4444; font-weight: 700; }
 
         .horizon-badge {
-            padding: 2px 6px; border-radius: 3px; font-size: .7em; font-weight: 700;
+            padding: 3px 8px; border-radius: 4px; font-size: .72em; font-weight: 700;
             color: #fff; margin-left: 4px;
         }
-        .horizon-day   { background: #6366f1; }
         .horizon-week  { background: #8b5cf6; }
         .horizon-month { background: #a855f7; }
 
         /* ── Inputs / misc ──────────────────────────────── */
-        .watchlist-container { display: flex; gap: 10px; margin-top: 10px; }
+        .watchlist-container { display: flex; gap: 10px; margin-top: 12px; }
         .watchlist-input {
-            flex: 1; padding: 8px 12px; border: 1px solid rgba(255,255,255,.12);
-            border-radius: 6px; background: rgba(40,40,80,.6); color: #fff;
+            flex: 1; padding: 10px 14px; border: 1px solid rgba(255,255,255,.12);
+            border-radius: 8px; background: rgba(40,40,80,.6); color: #fff;
+            font-size: .95em;
         }
+        .watchlist-input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,.25); }
         .watchlist-input::placeholder { color: #6b7280; }
 
-        .loading { text-align: center; color: #6b7280; font-style: italic; padding: 12px; }
-        .error { background: rgba(239,68,68,.15); color: #fca5a5; padding: 10px; border-radius: 6px; margin: 10px 0; }
+        .loading { text-align: center; color: #6b7280; font-style: italic; padding: 16px; }
+        .error { background: rgba(239,68,68,.12); color: #fca5a5; padding: 12px; border-radius: 8px; margin: 10px 0; border: 1px solid rgba(239,68,68,.2); }
 
         .refresh-btn {
-            background: #6366f1; color: #fff; border: none; padding: 5px 10px;
-            border-radius: 4px; cursor: pointer; font-size: .85em; margin-left: 10px;
+            background: #6366f1; color: #fff; border: none; padding: 5px 12px;
+            border-radius: 5px; cursor: pointer; font-size: .85em; margin-left: 10px;
+            transition: background .2s;
         }
         .refresh-btn:hover { background: #4f46e5; }
 
         select, input[type="checkbox"] { accent-color: #6366f1; }
         select {
-            padding: 5px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,.12);
-            background: rgba(40,40,80,.6); color: #fff;
+            padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,.12);
+            background: rgba(40,40,80,.6); color: #fff; font-size: .9em;
         }
+        select:focus { outline: none; border-color: #6366f1; }
 
         /* ── Popup ──────────────────────────────────────── */
         .analysis-popup {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,.6); z-index: 1000;
+            background: rgba(0,0,0,.65); z-index: 1000; backdrop-filter: blur(4px);
         }
         .analysis-content {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
-            background: #1e1e3c; padding: 28px; border-radius: 12px;
-            max-width: 640px; max-height: 80vh; overflow-y: auto;
-            box-shadow: 0 12px 40px rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.08);
+            background: #1e1e3c; padding: 28px; border-radius: 14px;
+            max-width: 680px; width: 90%; max-height: 80vh; overflow-y: auto;
+            box-shadow: 0 16px 48px rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.08);
             color: #e0e0e0;
         }
         .close-btn {
-            position: absolute; top: 10px; right: 15px; background: none;
-            border: none; font-size: 24px; cursor: pointer; color: #8e8ea0;
+            position: absolute; top: 12px; right: 16px; background: none;
+            border: none; font-size: 26px; cursor: pointer; color: #8e8ea0;
+            transition: color .2s;
         }
+        .close-btn:hover { color: #fff; }
 
         /* ── Notification settings panel ────────────────── */
         .notif-panel {
-            background: rgba(40,40,80,.5); padding: 16px; border-radius: 8px;
+            background: rgba(40,40,80,.5); padding: 18px; border-radius: 10px;
             margin-top: 14px; border: 1px solid rgba(99,102,241,.2);
         }
         .notif-panel h4 { color: #a5b4fc; margin-bottom: 10px; }
-        .notif-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+        .notif-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
         .notif-input {
-            padding: 7px 10px; border-radius: 5px;
+            padding: 9px 12px; border-radius: 6px;
             border: 1px solid rgba(255,255,255,.12);
             background: rgba(30,30,60,.8); color: #fff; flex: 1; min-width: 200px;
+            font-size: .95em;
+        }
+        .notif-input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,.25); }
+
+        /* ── Footer ─────────────────────────────────────── */
+        .footer {
+            text-align: center; color: #4b5563; font-size: .8em;
+            padding: 24px 0 12px; margin-top: 20px;
+        }
+
+        /* ── Responsive ─────────────────────────────────── */
+        @media (max-width: 768px) {
+            .container { padding: 12px; }
+            .header { padding: 16px 18px; }
+            .title { font-size: 1.5em; }
+            .grid { grid-template-columns: 1fr; }
+            .returns-grid { grid-template-columns: 1fr; }
+            .regime-strip { flex-direction: column; align-items: flex-start; }
         }
     </style>
 </head>
 <body>
-<div class="container">
+    <div class="container">
 
     <!-- Header -->
     <div class="header">
-        <h1 class="title">Trading Agent</h1>
-        <p class="subtitle">Multi-timeframe analysis &middot; Automated risk management &middot; SMS alerts</p>
-        <div class="controls">
-            <button class="btn btn-start" onclick="startAgent()">Start Agent</button>
-            <button class="btn btn-stop" onclick="stopAgent()">Stop Agent</button>
-            <button class="btn btn-liquidate" onclick="liquidatePositions()">Liquidate All</button>
+        <div class="header-top">
+            <h1 class="title">Trading Agent</h1>
+            <span class="mode-badge">Swing + Position</span>
         </div>
+        <p class="subtitle">6-signal analysis &middot; ATR-based risk management &middot; VIX regime filtering &middot; SMS alerts</p>
+        <div class="controls">
+            <button class="btn btn-start" onclick="startAgent()">&#9654; Start Agent</button>
+            <button class="btn btn-stop" onclick="stopAgent()">&#9632; Stop Agent</button>
+            <button class="btn btn-liquidate" onclick="liquidatePositions()">&#9888; Liquidate All</button>
+        </div>
+    </div>
+
+    <!-- Market Regime Strip -->
+    <div class="regime-strip" id="regime-strip">
+        <span class="regime-label">Market Regime:</span>
+        <span id="regime-value" class="regime-value regime-normal">Loading...</span>
+        <span class="regime-label" style="margin-left:auto;">VIX:</span>
+        <span id="regime-vix" class="regime-value">--</span>
+        <span class="regime-label">Position Sizing:</span>
+        <span id="regime-mult" class="regime-value">--</span>
     </div>
 
     <!-- Returns by Window -->
     <div class="card" style="margin-bottom:20px;">
-        <div class="card-header">Returns Overview</div>
+        <div class="card-header"><span class="card-header-icon">&#128200;</span> Returns Overview</div>
         <div class="returns-grid" id="returns-grid">
             <div class="loading">Loading returns...</div>
         </div>
@@ -194,19 +256,19 @@
     <!-- Top grid: Status / Portfolio / Performance / Market -->
     <div class="grid">
         <div class="card">
-            <div class="card-header">Agent Status</div>
+            <div class="card-header"><span class="card-header-icon">&#9881;</span> Agent Status</div>
             <div id="agent-status"><div class="loading">Loading...</div></div>
         </div>
         <div class="card">
-            <div class="card-header">Portfolio Summary</div>
+            <div class="card-header"><span class="card-header-icon">&#128176;</span> Portfolio Summary</div>
             <div id="portfolio-summary"><div class="loading">Loading...</div></div>
         </div>
         <div class="card">
-            <div class="card-header">Performance</div>
+            <div class="card-header"><span class="card-header-icon">&#128202;</span> Performance</div>
             <div id="performance-metrics"><div class="loading">Loading...</div></div>
         </div>
         <div class="card">
-            <div class="card-header">Market Status</div>
+            <div class="card-header"><span class="card-header-icon">&#127968;</span> Market Status</div>
             <div id="market-status"><div class="loading">Loading...</div></div>
         </div>
     </div>
@@ -214,63 +276,63 @@
     <!-- Current Positions -->
     <div class="table-container">
         <div class="card-header">
-            Current Positions
-            <button class="refresh-btn" onclick="refreshPositions()">Refresh</button>
+            <span class="card-header-icon">&#128188;</span> Current Positions
+            <button class="refresh-btn" onclick="refreshPositions()">&#8635; Refresh</button>
         </div>
         <div id="positions-table"><div class="loading">Loading positions...</div></div>
-    </div>
+        </div>
 
     <!-- Watchlist & Recommendations -->
     <div class="table-container" style="margin-top:20px;">
         <div class="card-header">
-            Watchlist &amp; Recommendations
-            <button class="refresh-btn" onclick="refreshWatchlist()">Refresh</button>
+            <span class="card-header-icon">&#128270;</span> Watchlist &amp; Recommendations
+            <button class="refresh-btn" onclick="refreshWatchlist()">&#8635; Refresh</button>
         </div>
-
+            
         <!-- Horizon selector + auto watchlist -->
         <div style="background:rgba(40,40,80,.5);padding:14px;border-radius:8px;margin:10px 0;display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
             <label style="font-weight:600;color:#a5b4fc;">Horizon:</label>
             <select id="horizon-select" onchange="refreshWatchlist()">
-                <option value="DAY">1 Day</option>
-                <option value="WEEK">1 Week</option>
+                <option value="WEEK" selected>1 Week</option>
                 <option value="MONTH">1 Month</option>
             </select>
 
             <label style="display:flex;align-items:center;gap:5px;">
-                <input type="checkbox" id="auto-watchlist-toggle" checked>
-                <span>Auto-select stocks</span>
-            </label>
+                        <input type="checkbox" id="auto-watchlist-toggle" checked>
+                        <span>Auto-select stocks</span>
+                    </label>
             <select id="screening-type" style="padding:5px;border-radius:4px;">
-                <option value="day_trading">Day Trading</option>
+                <option value="swing">Swing</option>
                 <option value="momentum">Momentum</option>
                 <option value="breakout">Breakout</option>
+                <option value="value">Value</option>
                 <option value="high_volume">High Volume</option>
-            </select>
+                    </select>
             <button class="btn" style="background:#8b5cf6;padding:5px 10px;font-size:.9em;" onclick="screenStocks()">Screen Now</button>
             <span id="auto-status" style="font-size:.85em;color:#6b7280;"></span>
-        </div>
-
+            </div>
+            
         <!-- Manual add -->
-        <div class="watchlist-container">
+            <div class="watchlist-container">
             <input type="text" class="watchlist-input" id="symbol-input" placeholder="Enter symbol (e.g. AAPL)" maxlength="10">
             <button class="btn" style="background:#6366f1;" onclick="addToWatchlist()">Add</button>
+            </div>
+            
+        <div id="watchlist-table"><div class="loading">Loading watchlist...</div></div>
         </div>
 
-        <div id="watchlist-table"><div class="loading">Loading watchlist...</div></div>
-    </div>
-
-    <!-- Market Movers -->
+        <!-- Market Movers -->
     <div class="table-container" style="margin-top:20px;">
         <div class="card-header">
-            Market Movers
-            <button class="refresh-btn" onclick="refreshMarketMovers()">Refresh</button>
+            <span class="card-header-icon">&#128640;</span> Market Movers
+            <button class="refresh-btn" onclick="refreshMarketMovers()">&#8635; Refresh</button>
         </div>
         <div id="market-movers"><div class="loading">Loading market movers...</div></div>
-    </div>
+            </div>
 
     <!-- Notification Settings -->
     <div class="table-container" style="margin-top:20px;">
-        <div class="card-header">SMS Notifications</div>
+        <div class="card-header"><span class="card-header-icon">&#128241;</span> SMS Notifications</div>
         <div class="notif-panel">
             <div class="notif-row">
                 <label style="display:flex;align-items:center;gap:5px;">
@@ -287,42 +349,81 @@
         </div>
     </div>
 
+    <div class="footer">Trading Agent &mdash; Swing + Position Mode &mdash; Paper Trading</div>
 </div><!-- /container -->
 
-<!-- Analysis Popup -->
-<div class="analysis-popup" id="analysis-popup">
-    <div class="analysis-content">
-        <button class="close-btn" onclick="closeAnalysis()">&times;</button>
+    <!-- Analysis Popup -->
+    <div class="analysis-popup" id="analysis-popup">
+        <div class="analysis-content">
+            <button class="close-btn" onclick="closeAnalysis()">&times;</button>
         <div id="analysis-content"></div>
+        </div>
     </div>
-</div>
 
-<script>
+    <script>
 // ── Global state ───────────────────────────────────────────
-let refreshInterval;
+        let refreshInterval;
+        let heavyRefreshInterval;   // separate timer for expensive calls
 
-document.addEventListener('DOMContentLoaded', function() {
-    refreshDashboard();
-    startAutoRefresh();
-    initializeAutoWatchlist();
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshDashboard();
+            startAutoRefresh();
+            initializeAutoWatchlist();
     loadNotifConfig();
 });
 
-function startAutoRefresh() { refreshInterval = setInterval(refreshDashboard, 15000); }
-function stopAutoRefresh() { if (refreshInterval) clearInterval(refreshInterval); }
+// Light refresh every 30s (status, portfolio, positions — cheap local data)
+// Heavy refresh every 120s (market movers, watchlist recommendations — hits Yahoo)
+function startAutoRefresh() {
+    refreshInterval = setInterval(refreshLight, 30000);
+    heavyRefreshInterval = setInterval(refreshHeavy, 120000);
+}
+function stopAutoRefresh() {
+    if (refreshInterval) clearInterval(refreshInterval);
+    if (heavyRefreshInterval) clearInterval(heavyRefreshInterval);
+}
 
-async function refreshDashboard() {
+// Light refresh — only local/cheap endpoints
+async function refreshLight() {
     try {
         await Promise.all([
-            refreshReturns(),
             refreshStatus(),
             refreshPortfolio(),
             refreshPerformance(),
-            refreshMarketStatus(),
             refreshPositions(),
-            refreshWatchlist(),
-            refreshMarketMovers()
+            refreshReturns(),
+            refreshMarketRegime()
         ]);
+    } catch (e) { console.error('Light refresh error:', e); }
+}
+
+// Heavy refresh — Yahoo-hitting endpoints
+async function refreshHeavy() {
+    try {
+        await refreshWatchlist();
+        // Small delay before market movers to avoid burst
+        await new Promise(r => setTimeout(r, 2000));
+        await refreshMarketMovers();
+    } catch (e) { console.error('Heavy refresh error:', e); }
+}
+
+// Full refresh on page load
+        async function refreshDashboard() {
+            try {
+                // Do cheap calls first
+                await Promise.all([
+            refreshReturns(),
+                    refreshStatus(),
+                    refreshPortfolio(),
+                    refreshPerformance(),
+                    refreshMarketStatus(),
+                    refreshPositions(),
+                    refreshMarketRegime()
+                ]);
+                // Then stagger the expensive calls
+                await refreshWatchlist();
+                await new Promise(r => setTimeout(r, 2000));
+                await refreshMarketMovers();
     } catch (e) { console.error('Dashboard refresh error:', e); }
 }
 
@@ -334,9 +435,8 @@ async function refreshReturns() {
         if (data.error) { document.getElementById('returns-grid').innerHTML = `<div class="error">${data.error}</div>`; return; }
 
         const windows = [
-            {key: '1d', label: '1 Day'},
-            {key: '1w', label: '1 Week'},
-            {key: '1m', label: '1 Month'}
+            {key: '1w', label: '1 Week (Swing)'},
+            {key: '1m', label: '1 Month (Position)'}
         ];
 
         let html = '';
@@ -364,6 +464,35 @@ async function refreshReturns() {
     }
 }
 
+// ── Market regime strip ────────────────────────────────────
+async function refreshMarketRegime() {
+    try {
+        const resp = await fetch('/api/status');
+        const data = await resp.json();
+        if (data.error || !data.market_regime) return;
+        const r = data.market_regime;
+        const vix = r.vix || 0;
+        const regime = r.regime || 'NORMAL';
+        const mult = r.position_multiplier || 1;
+
+        const regimeLabels = {
+            'LOW_VOL': 'Low Volatility', 'NORMAL': 'Normal',
+            'HIGH_VOL': 'High Volatility', 'EXTREME_FEAR': 'Extreme Fear'
+        };
+        const regimeClasses = {
+            'LOW_VOL': 'regime-low', 'NORMAL': 'regime-normal',
+            'HIGH_VOL': 'regime-high', 'EXTREME_FEAR': 'regime-extreme'
+        };
+        const cls = regimeClasses[regime] || 'regime-normal';
+
+        document.getElementById('regime-value').textContent = regimeLabels[regime] || regime;
+        document.getElementById('regime-value').className = 'regime-value ' + cls;
+        document.getElementById('regime-vix').textContent = vix.toFixed(1);
+        document.getElementById('regime-vix').className = 'regime-value ' + cls;
+        document.getElementById('regime-mult').textContent = (mult * 100).toFixed(0) + '%';
+    } catch (e) { /* silent */ }
+}
+
 // ── Agent status ───────────────────────────────────────────
 async function refreshStatus() {
     try {
@@ -374,8 +503,10 @@ async function refreshStatus() {
         document.getElementById('agent-status').innerHTML = `
             <div class="metric"><span class="metric-label">Status:</span>
                 <span class="metric-value"><span class="status-indicator ${s.is_running ? 'status-running' : 'status-stopped'}"></span>${s.is_running ? 'Running' : 'Stopped'}</span></div>
+            <div class="metric"><span class="metric-label">Mode:</span>
+                <span class="metric-value">${s.mode || 'Swing + Position'}</span></div>
             <div class="metric"><span class="metric-label">Market Hours:</span>
-                <span class="metric-value ${s.is_market_hours ? 'positive' : 'negative'}">${s.is_market_hours ? 'Active' : 'Closed'}</span></div>
+                <span class="metric-value ${s.is_market_hours ? 'positive' : 'negative'}">${s.is_market_hours ? 'Open' : 'Closed'}</span></div>
             <div class="metric"><span class="metric-label">Last Scan:</span>
                 <span class="metric-value">${new Date(s.last_scan).toLocaleTimeString()}</span></div>
             <div class="metric"><span class="metric-label">Watchlist:</span>
@@ -404,8 +535,8 @@ async function refreshPortfolio() {
 }
 
 // ── Performance ────────────────────────────────────────────
-async function refreshPerformance() {
-    try {
+        async function refreshPerformance() {
+            try {
         const resp = await fetch('/api/performance');
         const data = await resp.json();
         if (data.error || !data.total_trades) { document.getElementById('performance-metrics').innerHTML = '<div class="loading">No trading history yet</div>'; return; }
@@ -424,8 +555,8 @@ async function refreshPerformance() {
 }
 
 // ── Market status ──────────────────────────────────────────
-async function refreshMarketStatus() {
-    try {
+        async function refreshMarketStatus() {
+            try {
         const resp = await fetch('/api/status');
         const data = await resp.json();
         if (data.error) { document.getElementById('market-status').innerHTML = `<div class="error">${data.error}</div>`; return; }
@@ -441,30 +572,33 @@ async function refreshMarketStatus() {
 }
 
 // ── Positions ──────────────────────────────────────────────
-async function refreshPositions() {
-    try {
+        async function refreshPositions() {
+            try {
         const resp = await fetch('/api/positions');
         const data = await resp.json();
         if (data.error) { document.getElementById('positions-table').innerHTML = `<div class="error">${data.error}</div>`; return; }
-        if (!data.positions || data.positions.length === 0) {
+                if (!data.positions || data.positions.length === 0) {
             document.getElementById('positions-table').innerHTML = '<div class="loading">No open positions</div>'; return;
         }
         let html = `<table><thead><tr>
-            <th>Symbol</th><th>Horizon</th><th>Qty</th><th>Entry</th><th>Current</th><th>P&L</th><th>Value</th><th>SL</th><th>TP</th><th>Days</th>
+            <th>Symbol</th><th>Horizon</th><th>Qty</th><th>Entry</th><th>Current</th><th>P&L</th><th>%</th><th>Value</th><th>SL</th><th>TP</th><th>Days</th><th></th>
         </tr></thead><tbody>`;
         data.positions.forEach(p => {
-            const hCls = 'horizon-' + (p.horizon || 'day').toLowerCase();
+            const hCls = 'horizon-' + (p.horizon || 'week').toLowerCase();
+            const pctCls = (p.percentage_gain_loss || 0) >= 0 ? 'positive' : 'negative';
             html += `<tr>
                 <td><strong>${p.symbol}</strong></td>
-                <td><span class="horizon-badge ${hCls}">${p.horizon || 'DAY'}</span></td>
+                <td><span class="horizon-badge ${hCls}">${p.horizon || 'WEEK'}</span></td>
                 <td>${p.quantity}</td>
                 <td>$${p.entry_price.toFixed(2)}</td>
                 <td>$${p.current_price.toFixed(2)}</td>
                 <td class="${p.unrealized_pnl >= 0 ? 'positive' : 'negative'}">$${p.unrealized_pnl.toFixed(2)}</td>
+                <td class="${pctCls}">${(p.percentage_gain_loss || 0).toFixed(2)}%</td>
                 <td>$${p.market_value.toFixed(2)}</td>
                 <td>${p.stop_loss ? '$'+p.stop_loss.toFixed(2) : '-'}</td>
                 <td>${p.take_profit ? '$'+p.take_profit.toFixed(2) : '-'}</td>
                 <td>${p.holding_days ?? '-'}</td>
+                <td><button class="btn btn-stop" style="padding:3px 10px;font-size:.78em;" onclick="quickSell('${p.symbol}')">Sell</button></td>
             </tr>`;
         });
         html += '</tbody></table>';
@@ -473,57 +607,98 @@ async function refreshPositions() {
 }
 
 // ── Watchlist ──────────────────────────────────────────────
-async function refreshWatchlist() {
+let _watchlistLoading = false;
+
+async function fetchWithTimeout(url, timeoutMs = 45000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const resp = await fetch(url, { signal: controller.signal });
+        clearTimeout(timer);
+        return resp;
+    } catch (e) {
+        clearTimeout(timer);
+        throw e;
+    }
+}
+
+async function refreshWatchlist(retries = 1) {
+    if (_watchlistLoading) return;          // prevent overlapping calls
+    _watchlistLoading = true;
+    const el = document.getElementById('watchlist-table');
+    // Show spinner only if currently empty / error
+    if (!el.querySelector('table')) {
+        el.innerHTML = '<div class="loading">&#8987; Analysing watchlist&hellip; (this may take a few seconds)</div>';
+    }
     try {
         const horizon = document.getElementById('horizon-select').value;
-        const resp = await fetch(`/api/watchlist/recommendations?horizon=${horizon}`);
+        const resp = await fetchWithTimeout(`/api/watchlist/recommendations?horizon=${horizon}`, 60000);
         const data = await resp.json();
-        if (data.error) { document.getElementById('watchlist-table').innerHTML = `<div class="error">${data.error}</div>`; return; }
+        if (data.error) { el.innerHTML = `<div class="error">${data.error}</div>`; _watchlistLoading = false; return; }
         if (!data.recommendations || data.recommendations.length === 0) {
-            document.getElementById('watchlist-table').innerHTML = '<div class="loading">No symbols in watchlist</div>'; return;
+            el.innerHTML = '<div class="loading">No symbols in watchlist</div>'; _watchlistLoading = false; return;
         }
 
         let html = `<table><thead><tr>
-            <th>Symbol</th><th>Price</th><th>Recommendation</th><th>Confidence</th>
-            <th>Position Size</th><th>Stop Loss</th><th>Take Profit</th><th>Actions</th>
+            <th>Symbol</th><th>Price</th><th>Signal</th><th>Confidence</th>
+            <th>Pos. Size</th><th>SL</th><th>TP</th><th>Trade</th><th>Actions</th>
         </tr></thead><tbody>`;
 
         data.recommendations.forEach(rec => {
             const aCls = rec.action ? `recommendation-${rec.action.toLowerCase()}` : 'recommendation-hold';
             const cCls = getConfidenceClass(rec.confidence);
+            const h = document.getElementById('horizon-select').value;
             html += `<tr>
                 <td><strong>${rec.symbol}</strong></td>
                 <td>$${rec.current_price ? rec.current_price.toFixed(2) : 'N/A'}</td>
                 <td><span class="recommendation-badge ${aCls}">${rec.action || 'HOLD'}</span></td>
                 <td><span class="${cCls}">${rec.confidence ? rec.confidence.toFixed(1) : 'N/A'}%</span></td>
                 <td>$${rec.position_size ? rec.position_size.toFixed(2) : 'N/A'}</td>
-                <td>$${rec.stop_loss ? rec.stop_loss.toFixed(2) : 'N/A'}</td>
-                <td>$${rec.take_profit ? rec.take_profit.toFixed(2) : 'N/A'}</td>
-                <td>
+                <td>${rec.stop_loss ? '$'+rec.stop_loss.toFixed(2) : '-'}</td>
+                <td>${rec.take_profit ? '$'+rec.take_profit.toFixed(2) : '-'}</td>
+                <td style="white-space:nowrap;">
+                    <button class="btn btn-start" style="padding:4px 10px;font-size:.78em;" onclick="quickBuy('${rec.symbol}','${h}')">Buy</button>
+                    <button class="btn btn-stop" style="padding:4px 10px;font-size:.78em;" onclick="quickSell('${rec.symbol}')">Sell</button>
+                </td>
+                <td style="white-space:nowrap;">
                     <button class="btn" style="background:#6366f1;padding:3px 8px;font-size:.78em;" onclick="analyzeSymbol('${rec.symbol}')">Details</button>
-                    <button class="btn" style="background:#ef4444;padding:3px 8px;font-size:.78em;" onclick="removeFromWatchlist('${rec.symbol}')">Remove</button>
+                    <button class="btn" style="background:rgba(107,114,128,.7);padding:3px 8px;font-size:.78em;" onclick="removeFromWatchlist('${rec.symbol}')">&#10005;</button>
                 </td>
             </tr>`;
         });
         html += '</tbody></table>';
-        document.getElementById('watchlist-table').innerHTML = html;
-    } catch (e) { document.getElementById('watchlist-table').innerHTML = '<div class="error">Error loading watchlist</div>'; }
+        if (data.cached) html += '<div style="text-align:right;font-size:.75em;color:#6b7280;margin-top:4px;">cached &middot; refreshes every 60s</div>';
+        el.innerHTML = html;
+    } catch (e) {
+        console.error('Watchlist error:', e);
+        if (retries > 0) {
+            // Retry once after 3s
+            setTimeout(() => { _watchlistLoading = false; refreshWatchlist(retries - 1); }, 3000);
+            return;
+        }
+        // Only show error if there's no table already displayed
+        if (!el.querySelector('table')) {
+            el.innerHTML = '<div class="error">Error loading watchlist — will retry automatically</div>';
+        }
+    } finally {
+        _watchlistLoading = false;
+    }
 }
 
 function getConfidenceClass(c) {
     if (!c) return 'confidence-low';
     if (c >= 70) return 'confidence-high';
     if (c >= 40) return 'confidence-medium';
-    return 'confidence-low';
-}
+            return 'confidence-low';
+        }
 
 // ── Market movers ──────────────────────────────────────────
-async function refreshMarketMovers() {
-    try {
+        async function refreshMarketMovers() {
+            try {
         const resp = await fetch('/api/market-movers');
         const data = await resp.json();
         if (data.error) { document.getElementById('market-movers').innerHTML = `<div class="error">${data.error}</div>`; return; }
-        if (!data.movers || data.movers.length === 0) {
+                if (!data.movers || data.movers.length === 0) {
             document.getElementById('market-movers').innerHTML = '<div class="loading">No market data available</div>'; return;
         }
         let html = `<table><thead><tr><th>Symbol</th><th>Price</th><th>Change</th><th>Change %</th><th>Volume</th></tr></thead><tbody>`;
@@ -542,19 +717,19 @@ async function refreshMarketMovers() {
 }
 
 // ── Agent controls ─────────────────────────────────────────
-async function startAgent() {
-    try {
+        async function startAgent() {
+            try {
         const r = await fetch('/api/start-agent', {method:'POST'});
         const d = await r.json(); alert(d.message || d.error); refreshStatus();
     } catch (e) { alert('Error starting agent: ' + e.message); }
 }
-async function stopAgent() {
-    try {
+        async function stopAgent() {
+            try {
         const r = await fetch('/api/stop-agent', {method:'POST'});
         const d = await r.json(); alert(d.message || d.error); refreshStatus();
     } catch (e) { alert('Error stopping agent: ' + e.message); }
 }
-async function liquidatePositions() {
+        async function liquidatePositions() {
     if (!confirm('Liquidate ALL positions?')) return;
     try {
         const r = await fetch('/api/liquidate', {method:'POST'});
@@ -563,7 +738,7 @@ async function liquidatePositions() {
 }
 
 // ── Watchlist management ───────────────────────────────────
-async function addToWatchlist() {
+        async function addToWatchlist() {
     const inp = document.getElementById('symbol-input');
     const sym = inp.value.trim().toUpperCase();
     if (!sym) { alert('Please enter a symbol'); return; }
@@ -575,7 +750,7 @@ async function addToWatchlist() {
 async function removeFromWatchlist(sym) {
     try {
         await fetch('/api/watchlist/remove', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol:sym})});
-        refreshWatchlist();
+                refreshWatchlist();
     } catch (e) { alert('Error: ' + e.message); }
 }
 
@@ -586,14 +761,14 @@ async function analyzeSymbol(sym) {
         const r = await fetch(`/api/analyze/${sym}?horizon=${horizon}`);
         const data = await r.json();
         if (data.error) { alert('Error: ' + data.error); return; }
-        showAnalysis(data);
+                showAnalysis(data);
     } catch (e) { alert('Error: ' + e.message); }
 }
 
 function showAnalysis(a) {
     const rec = a.recommendation || {};
     const sigs = a.signals || {};
-    let html = `<h2 style="color:#fff;">Analysis: ${a.symbol} <span class="horizon-badge horizon-${(a.horizon||'day').toLowerCase()}">${a.horizon||'DAY'}</span></h2>
+    let html = `<h2 style="color:#fff;">Analysis: ${a.symbol} <span class="horizon-badge horizon-${(a.horizon||'week').toLowerCase()}">${a.horizon||'WEEK'}</span></h2>
         <div style="margin:16px 0;"><h3 style="color:#a5b4fc;">Price: $${a.current_price ? a.current_price.toFixed(2) : 'N/A'}</h3></div>
         <div style="margin:16px 0;">
             <h3 style="color:#a5b4fc;">Recommendation</h3>
@@ -607,30 +782,68 @@ function showAnalysis(a) {
         </div>`;
 
     if (sigs.combined_score) {
+        const cs = sigs.combined_score;
         html += `<div style="margin:16px 0;"><h3 style="color:#a5b4fc;">Signal Analysis</h3>
-            <div class="metric"><span class="metric-label">Combined Score:</span><span class="metric-value">${sigs.combined_score.strength ? sigs.combined_score.strength.toFixed(1) : 'N/A'}</span></div>`;
-        ['momentum','reversal','breakout','volume'].forEach(st => {
+            <div class="metric"><span class="metric-label">Combined Score:</span><span class="metric-value">${cs.strength ? cs.strength.toFixed(1) : 'N/A'}%</span></div>
+            <div class="metric"><span class="metric-label">Buy Agreement:</span><span class="metric-value">${cs.buy_agreement || 0}/6 strategies</span></div>
+            <div class="metric"><span class="metric-label">Sell Agreement:</span><span class="metric-value">${cs.sell_agreement || 0}/6 strategies</span></div>`;
+
+        const stNames = {
+            'momentum': 'Momentum', 'reversal': 'Mean Reversion', 'breakout': 'Breakout',
+            'volume': 'Volume/OBV', 'fundamentals': 'Fundamentals', 'relative_strength': 'Rel. Strength'
+        };
+        Object.keys(stNames).forEach(st => {
             if (sigs[st]) {
-                html += `<div class="metric"><span class="metric-label">${st.charAt(0).toUpperCase()+st.slice(1)}:</span>
-                    <span class="recommendation-badge recommendation-${(sigs[st].signal||'hold').toLowerCase()}">${sigs[st].signal||'HOLD'}</span>
-                    <span style="margin-left:8px;">${sigs[st].strength ? sigs[st].strength.toFixed(1) : 'N/A'}%</span></div>`;
+                const s = sigs[st];
+                html += `<div class="metric" style="border-bottom:1px solid rgba(255,255,255,.04);padding:6px 0;">
+                    <span class="metric-label">${stNames[st]}:</span>
+                    <span>
+                        <span class="recommendation-badge recommendation-${(s.signal||'hold').toLowerCase()}">${s.signal||'HOLD'}</span>
+                        <span style="margin-left:8px;color:#a5b4fc;">${s.strength ? s.strength.toFixed(1) : '0'}%</span>
+                    </span></div>`;
+                if (s.reasons && s.reasons.length > 0) {
+                    html += `<div style="padding:2px 0 8px 12px;font-size:.82em;color:#8e8ea0;">${s.reasons.join(' · ')}</div>`;
+                }
             }
         });
         html += '</div>';
     }
 
+    // Risk assessment
+    if (a.risk_score) {
+        const risk = a.risk_score;
+        const rCls = risk.level === 'HIGH' ? 'negative' : risk.level === 'MEDIUM' ? 'neutral' : 'positive';
+        html += `<div style="margin:16px 0;"><h3 style="color:#a5b4fc;">Risk Assessment</h3>
+            <div class="metric"><span class="metric-label">Risk Level:</span><span class="metric-value ${rCls}">${risk.level || 'N/A'}</span></div>`;
+        if (risk.factors && risk.factors.length > 0) {
+            html += `<div style="padding:4px 0 4px 0;font-size:.85em;color:#8e8ea0;">`;
+            risk.factors.forEach(f => { html += `<div style="padding:2px 0;">&#9888; ${f}</div>`; });
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+
+    // ATR info
+    if (rec.atr) {
+        html += `<div style="margin:16px 0;"><h3 style="color:#a5b4fc;">ATR-Based Stops</h3>
+            <div class="metric"><span class="metric-label">ATR:</span><span class="metric-value">$${rec.atr.toFixed(2)}</span></div>
+            <div class="metric"><span class="metric-label">Stop Distance:</span><span class="metric-value">$${rec.atr_stop_distance ? rec.atr_stop_distance.toFixed(2) : 'N/A'}</span></div>
+            <div class="metric"><span class="metric-label">Regime Mult:</span><span class="metric-value">${rec.regime_multiplier ? (rec.regime_multiplier*100).toFixed(0) + '%' : 'N/A'}</span></div>
+        </div>`;
+    }
+
     document.getElementById('analysis-content').innerHTML = html;
-    document.getElementById('analysis-popup').style.display = 'block';
-}
+            document.getElementById('analysis-popup').style.display = 'block';
+        }
 function closeAnalysis() { document.getElementById('analysis-popup').style.display = 'none'; }
 
 // ── Auto watchlist ─────────────────────────────────────────
-function initializeAutoWatchlist() {
-    document.getElementById('auto-watchlist-toggle').addEventListener('change', toggleAutoWatchlist);
-    refreshAutoWatchlistStatus();
-}
-async function refreshAutoWatchlistStatus() {
-    try {
+        function initializeAutoWatchlist() {
+            document.getElementById('auto-watchlist-toggle').addEventListener('change', toggleAutoWatchlist);
+            refreshAutoWatchlistStatus();
+        }
+        async function refreshAutoWatchlistStatus() {
+            try {
         const r = await fetch('/api/auto-watchlist/status');
         const d = await r.json();
         if (!d.error) {
@@ -642,7 +855,7 @@ async function refreshAutoWatchlistStatus() {
         }
     } catch (e) { console.error(e); }
 }
-async function toggleAutoWatchlist() {
+        async function toggleAutoWatchlist() {
     const en = document.getElementById('auto-watchlist-toggle').checked;
     try {
         const r = await fetch('/api/auto-watchlist/enable', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:en})});
@@ -651,10 +864,10 @@ async function toggleAutoWatchlist() {
         else { refreshAutoWatchlistStatus(); if (en) setTimeout(refreshWatchlist, 2000); }
     } catch (e) { alert('Error: '+e.message); document.getElementById('auto-watchlist-toggle').checked = !en; }
 }
-async function screenStocks() {
+        async function screenStocks() {
     const t = document.getElementById('screening-type').value;
-    try {
-        document.getElementById('auto-status').textContent = 'Screening...';
+            try {
+                document.getElementById('auto-status').textContent = 'Screening...';
         const r = await fetch(`/api/screen-stocks?type=${t}&max_stocks=25`);
         const d = await r.json();
         if (d.error) alert('Error: '+d.error);
@@ -692,9 +905,53 @@ async function testNotification() {
     } catch (e) { alert('Error: '+e.message); }
 }
 
+// ── Quick Buy / Sell ───────────────────────────────────────
+async function quickBuy(symbol, horizon) {
+    const qty = prompt(`Buy ${symbol} (${horizon})\nEnter quantity (leave blank for auto-size):`, '');
+    if (qty === null) return; // cancelled
+    const body = { symbol, side: 'buy', horizon };
+    if (qty.trim() !== '') {
+        const n = parseInt(qty);
+        if (isNaN(n) || n <= 0) { alert('Invalid quantity'); return; }
+        body.quantity = n;
+    }
+    try {
+        const r = await fetch('/api/trade', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+        const d = await r.json();
+        if (d.success) {
+            alert(`✅ ${d.message}`);
+            refreshPositions(); refreshPortfolio(); refreshWatchlist();
+        } else {
+            alert('❌ ' + (d.error || 'Trade failed'));
+        }
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function quickSell(symbol) {
+    if (!confirm(`Sell / close position for ${symbol}?`)) return;
+    try {
+        const r = await fetch('/api/trade', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ symbol, side: 'sell' })
+        });
+        const d = await r.json();
+        if (d.success) {
+            alert(`✅ Sold ${symbol}` + (d.pnl !== undefined ? ` — P&L: $${d.pnl.toFixed(2)}` : ''));
+            refreshPositions(); refreshPortfolio(); refreshWatchlist();
+        } else {
+            alert('❌ ' + (d.error || 'Sell failed'));
+        }
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
 // ── Keyboard shortcuts ─────────────────────────────────────
 document.addEventListener('keypress', function(e) { if (e.key === 'Enter' && e.target.id === 'symbol-input') addToWatchlist(); });
 document.getElementById('analysis-popup').addEventListener('click', function(e) { if (e.target === this) closeAnalysis(); });
-</script>
+    </script>
 </body>
 </html>

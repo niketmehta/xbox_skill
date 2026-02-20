@@ -11,7 +11,7 @@ from config import Config
 
 class StockScreener:
     """
-    Automatic stock screener for day trading opportunities
+    Automatic stock screener for swing and position trading opportunities.
     """
     
     def __init__(self, data_provider: MarketDataProvider):
@@ -26,23 +26,24 @@ class StockScreener:
             'nyse': self._get_nyse_symbols(),
             'small_cap': self._get_small_cap_symbols(),
             'high_volume': self._get_high_volume_stocks(),
-            'popular_day_trading': self._get_popular_day_trading_stocks(),
+            'popular_trading': self._get_popular_trading_stocks(),
             'high_volatility': self._get_high_volatility_stocks()
         }
     
-    def screen_stocks(self, max_stocks: int = 80, screen_type: str = 'day_trading') -> List[str]:
+    def screen_stocks(self, max_stocks: int = 80, screen_type: str = 'swing') -> List[str]:
         """
-        Screen stocks automatically based on day trading criteria with increased risk and diversity
+        Screen stocks for swing/position trading opportunities.
         
         Args:
             max_stocks: Maximum number of stocks to return (default: 80)
-            screen_type: Type of screening ('day_trading', 'breakout', 'momentum', 'high_volume', 'high_volatility')
+            screen_type: Type of screening ('swing', 'breakout', 'momentum',
+                         'high_volume', 'high_volatility', 'value')
         """
         
         self.logger.info(f"Starting automatic stock screening: {screen_type}")
         
-        if screen_type == 'day_trading':
-            return self._screen_day_trading_stocks(max_stocks)
+        if screen_type == 'swing':
+            return self._screen_swing_stocks(max_stocks)
         elif screen_type == 'breakout':
             return self._screen_breakout_stocks(max_stocks)
         elif screen_type == 'momentum':
@@ -51,30 +52,30 @@ class StockScreener:
             return self._screen_high_volume_stocks(max_stocks)
         elif screen_type == 'high_volatility':
             return self._screen_high_volatility_stocks(max_stocks)
+        elif screen_type == 'value':
+            return self._screen_value_stocks(max_stocks)
         else:
-            return self._screen_day_trading_stocks(max_stocks)
+            return self._screen_swing_stocks(max_stocks)
     
-    def _screen_day_trading_stocks(self, max_stocks: int) -> List[str]:
-        """Screen for optimal day trading stocks with increased risk and diversity"""
+    def _screen_swing_stocks(self, max_stocks: int) -> List[str]:
+        """Screen for optimal swing/position trading stocks."""
         
-        # Combine multiple stock universes with more diversity
+        # Combine multiple stock universes
         candidate_symbols = list(set(
-            self.stock_universes['popular_day_trading'] +
+            self.stock_universes['popular_trading'] +
             self.stock_universes['high_volume'][:40] +
             self.stock_universes['nyse'][:50] +
-            self.stock_universes['small_cap'][:60] +
-            self.stock_universes['high_volatility'][:30] +
+            self.stock_universes['sp500'][:60] +
+            self.stock_universes['nasdaq100'][:40] +
             self._get_current_market_movers(30)
         ))
         
-        # Screen criteria for day trading
         screened_stocks = []
         
         with ThreadPoolExecutor(max_workers=10) as executor:
-            # Submit screening tasks
             future_to_symbol = {
-                executor.submit(self._evaluate_day_trading_stock, symbol): symbol 
-                for symbol in candidate_symbols[:100]  # Limit to avoid API limits
+                executor.submit(self._evaluate_swing_stock, symbol): symbol 
+                for symbol in candidate_symbols[:100]
             }
             
             for future in as_completed(future_to_symbol):
@@ -90,13 +91,9 @@ class StockScreener:
                 except Exception as e:
                     self.logger.warning(f"Error screening {symbol}: {e}")
         
-        # Sort by score and return top stocks
         screened_stocks.sort(key=lambda x: x['score'], reverse=True)
-        
         selected_symbols = [stock['symbol'] for stock in screened_stocks[:max_stocks]]
-        
-        self.logger.info(f"Selected {len(selected_symbols)} stocks for day trading")
-        
+        self.logger.info(f"Selected {len(selected_symbols)} stocks for swing trading")
         return selected_symbols
     
     def _evaluate_volatility_stock(self, symbol: str) -> Optional[Dict]:
@@ -143,31 +140,23 @@ class StockScreener:
             self.logger.warning(f"Error evaluating volatility for {symbol}: {e}")
             return None
     
-    def _evaluate_day_trading_stock(self, symbol: str) -> Optional[Dict]:
-        """Evaluate if a stock is suitable for day trading"""
+    def _evaluate_swing_stock(self, symbol: str) -> Optional[Dict]:
+        """Evaluate if a stock is suitable for swing/position trading."""
         
         try:
-            # Get recent data
             ticker = yf.Ticker(symbol)
-            
-            # Get 30 days of data for analysis
-            data = ticker.history(period="30d", interval="1d")
+            data = ticker.history(period="60d", interval="1d")
             if data.empty or len(data) < 20:
                 return None
             
-            # Get current quote
             quote = self.data_provider.get_real_time_quote(symbol)
             if not quote:
                 return None
             
-            # Calculate screening metrics
             metrics = self._calculate_screening_metrics(data, quote)
+            score = self._calculate_swing_score(metrics)
             
-            # Score the stock (0-100)
-            score = self._calculate_day_trading_score(metrics)
-            
-            # Determine if suitable (score > 60)
-            suitable = score > 60
+            suitable = score > 55  # slightly lower threshold for wider net
             
             return {
                 'suitable': suitable,
@@ -224,66 +213,60 @@ class StockScreener:
             'atr_percent': atr
         }
     
-    def _calculate_day_trading_score(self, metrics: Dict) -> float:
-        """Calculate day trading suitability score (0-100)"""
+    def _calculate_swing_score(self, metrics: Dict) -> float:
+        """Calculate swing-trading suitability score (0-100)."""
         
         score = 0
         
-        # Volume criteria (30 points max)
-        if metrics['avg_volume_20d'] > 1000000:  # > 1M average volume
-            score += 20
-        elif metrics['avg_volume_20d'] > 500000:  # > 500K average volume
-            score += 15
-        elif metrics['avg_volume_20d'] > 100000:  # > 100K average volume
-            score += 10
+        # Volume criteria (25 points max)
+        if metrics['avg_volume_20d'] > 1000000:
+            score += 18
+        elif metrics['avg_volume_20d'] > 500000:
+            score += 12
+        elif metrics['avg_volume_20d'] > 100000:
+            score += 8
         
-        if metrics['volume_ratio'] > 1.5:  # Above average volume today
-            score += 10
+        if metrics['volume_ratio'] > 1.5:
+            score += 7
         elif metrics['volume_ratio'] > 1.2:
-            score += 5
+            score += 4
         
-        # Volatility criteria (30 points max) - Increased for higher risk
-        if 3 <= metrics['daily_volatility'] <= 12:  # Higher volatility sweet spot
+        # Volatility criteria (25 points max) — moderate vol is best for swing
+        if 1.5 <= metrics['daily_volatility'] <= 4:
             score += 25
-        elif 2 <= metrics['daily_volatility'] <= 15:
+        elif 1 <= metrics['daily_volatility'] <= 6:
             score += 20
-        elif 1 <= metrics['daily_volatility'] <= 20:
-            score += 15
-        elif metrics['daily_volatility'] <= 25:
-            score += 10
+        elif 0.5 <= metrics['daily_volatility'] <= 8:
+            score += 12
         
-        if 1.5 <= metrics['atr_percent'] <= 8:  # Higher intraday range
-            score += 5
-        
-        # Price criteria (20 points max)
-        if 10 <= metrics['current_price'] <= 500:  # Reasonable price range
+        # Price criteria (15 points max)
+        if 15 <= metrics['current_price'] <= 500:
             score += 15
         elif 5 <= metrics['current_price'] <= 1000:
             score += 10
         elif metrics['current_price'] >= 1:
             score += 5
         
-        if metrics['price_range_20d'] > 15:  # Good 20-day range
-            score += 5
-        
-        # Market cap criteria (15 points max) - Include more small caps
-        if metrics['market_cap'] > 1e9:  # > $1B market cap
-            score += 12
-        elif metrics['market_cap'] > 100e6:  # > $100M market cap
+        # Market cap criteria (20 points max) — favour quality names
+        if metrics['market_cap'] > 10e9:
+            score += 20
+        elif metrics['market_cap'] > 2e9:
             score += 15
-        elif metrics['market_cap'] > 50e6:  # > $50M market cap
+        elif metrics['market_cap'] > 500e6:
             score += 10
-        elif metrics['market_cap'] > 0:
-            score += 8
-        
-        # Momentum criteria (10 points max)
-        if abs(metrics['price_5d_change']) > 2:  # Some recent movement
+        elif metrics['market_cap'] > 100e6:
             score += 5
         
-        if abs(metrics['price_20d_change']) < 50:  # Not too extreme
+        # Momentum criteria (15 points max)
+        if 2 < metrics['price_20d_change'] < 20:  # uptrend but not parabolic
+            score += 10
+        elif 0 < metrics['price_20d_change'] < 30:
             score += 5
         
-        return min(score, 100)  # Cap at 100
+        if abs(metrics['price_5d_change']) > 1:
+            score += 5
+        
+        return min(score, 100)
     
     def _screen_breakout_stocks(self, max_stocks: int) -> List[str]:
         """Screen for breakout opportunities"""
@@ -506,9 +489,9 @@ class StockScreener:
         ]
         return high_volume_stocks
     
-    def _get_popular_day_trading_stocks(self) -> List[str]:
-        """Get popular day trading stocks"""
-        day_trading_stocks = [
+    def _get_popular_trading_stocks(self) -> List[str]:
+        """Get popular liquid trading stocks."""
+        popular_stocks = [
             'SPY', 'QQQ', 'IWM', 'AAPL', 'TSLA', 'AMD', 'NVDA', 'MSFT',
             'AMZN', 'GOOGL', 'META', 'NFLX', 'BABA', 'DIS', 'V', 'JPM',
             'BAC', 'XOM', 'CVX', 'JNJ', 'PG', 'KO', 'PFE', 'T', 'VZ',
@@ -516,38 +499,117 @@ class StockScreener:
             'TMO', 'COST', 'ABT', 'DHR', 'TXN', 'NEE', 'PMT', 'LIN',
             'NKE', 'CMCSA', 'INTC', 'COP', 'QCOM', 'HON', 'UPS', 'LOW'
         ]
-        return day_trading_stocks
+        return popular_stocks
     
+    def _screen_value_stocks(self, max_stocks: int) -> List[str]:
+        """Screen for value stocks with reasonable P/E and solid fundamentals."""
+        
+        candidate_symbols = list(set(
+            self.stock_universes['sp500'][:60] +
+            self.stock_universes['nyse'][:40]
+        ))
+        
+        value_stocks = []
+        
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            future_to_symbol = {
+                executor.submit(self._evaluate_value_stock, symbol): symbol
+                for symbol in candidate_symbols[:80]
+            }
+            
+            for future in as_completed(future_to_symbol):
+                symbol = future_to_symbol[future]
+                try:
+                    result = future.result(timeout=10)
+                    if result and result['suitable']:
+                        value_stocks.append({
+                            'symbol': symbol,
+                            'score': result['score']
+                        })
+                except Exception as e:
+                    self.logger.warning(f"Error screening value stock {symbol}: {e}")
+        
+        value_stocks.sort(key=lambda x: x['score'], reverse=True)
+        selected = [s['symbol'] for s in value_stocks[:max_stocks]]
+        self.logger.info(f"Selected {len(selected)} value stocks")
+        return selected
+
+    def _evaluate_value_stock(self, symbol: str) -> Optional[Dict]:
+        """Evaluate a stock for value characteristics."""
+        try:
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+            pe = info.get('trailingPE') or info.get('forwardPE')
+            pb = info.get('priceToBook')
+            div_yield = info.get('dividendYield', 0) or 0
+            profit_margin = info.get('profitMargins', 0) or 0
+            
+            if pe is None or pe <= 0:
+                return None
+            
+            score = 0
+            # Reasonable P/E (max 30 pts)
+            if 5 < pe < 15:
+                score += 30
+            elif 15 <= pe < 25:
+                score += 20
+            elif 25 <= pe < 35:
+                score += 10
+            
+            # Low P/B (max 20 pts)
+            if pb is not None:
+                if pb < 1.5:
+                    score += 20
+                elif pb < 3:
+                    score += 12
+                elif pb < 5:
+                    score += 5
+            
+            # Dividend yield (max 20 pts)
+            if div_yield > 0.04:
+                score += 20
+            elif div_yield > 0.02:
+                score += 12
+            elif div_yield > 0.01:
+                score += 5
+            
+            # Profit margin (max 20 pts)
+            if profit_margin > 0.20:
+                score += 20
+            elif profit_margin > 0.10:
+                score += 12
+            elif profit_margin > 0.05:
+                score += 5
+            
+            return {'suitable': score >= 40, 'score': score}
+        except Exception:
+            return None
+
     def get_smart_watchlist(self, size: int = 50) -> List[str]:
-        """Get a smart watchlist combining multiple screening methods with increased diversity"""
+        """Get a smart watchlist combining multiple screening methods."""
         
         try:
-            # Get different types of stocks with more diversity
-            day_trading_stocks = self._screen_day_trading_stocks(size // 2)
+            swing_stocks = self._screen_swing_stocks(size // 2)
             momentum_stocks = self._screen_momentum_stocks(size // 4)
             breakout_stocks = self._screen_breakout_stocks(size // 4)
-            small_cap_stocks = self.stock_universes['small_cap'][:size // 6]
-            nyse_stocks = self.stock_universes['nyse'][:size // 6]
+            value_stocks = self._screen_value_stocks(size // 6)
+            sp500_stocks = self.stock_universes['sp500'][:size // 6]
             
             # Combine and deduplicate
             combined_stocks = list(set(
-                day_trading_stocks + momentum_stocks + breakout_stocks + 
-                small_cap_stocks + nyse_stocks
+                swing_stocks + momentum_stocks + breakout_stocks +
+                value_stocks + sp500_stocks
             ))
             
-            # If not enough, add high volume and high volatility stocks
+            # If not enough, pad with high-quality names
             if len(combined_stocks) < size:
-                high_volume = self._get_high_volume_stocks()
-                high_volatility = self._get_high_volatility_stocks()
-                for stock in high_volume + high_volatility:
+                for stock in self.stock_universes['nasdaq100']:
                     if stock not in combined_stocks and len(combined_stocks) < size:
                         combined_stocks.append(stock)
             
             self.logger.info(f"Generated smart watchlist with {len(combined_stocks)} stocks")
-            
             return combined_stocks[:size]
             
         except Exception as e:
             self.logger.error(f"Error generating smart watchlist: {e}")
-            # Fallback to popular day trading stocks
-            return self._get_popular_day_trading_stocks()[:size]
+            return self._get_popular_trading_stocks()[:size]

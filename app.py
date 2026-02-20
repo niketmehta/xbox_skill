@@ -1,9 +1,11 @@
 from flask import Flask, render_template, jsonify, request, redirect, url_for
 from flask_cors import CORS
 import json
+import math
 import numpy as np
 from datetime import datetime
 import threading
+import time as _time
 import logging
 
 from config import Config
@@ -37,8 +39,14 @@ def start_trading_agent():
 
 # ── Helpers ─────────────────────────────────────────────────────
 
+def _safe_float(v):
+    """Return 0 for NaN / Inf so JSON stays valid."""
+    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+        return 0
+    return v
+
 def convert_numpy_types(obj):
-    """Recursively convert numpy types to Python native types"""
+    """Recursively convert numpy types to Python native types (NaN/Inf → 0)."""
     if isinstance(obj, dict):
         return {key: convert_numpy_types(value) for key, value in obj.items()}
     elif isinstance(obj, list):
@@ -46,14 +54,22 @@ def convert_numpy_types(obj):
     elif isinstance(obj, np.integer):
         return int(obj)
     elif isinstance(obj, np.floating):
-        return float(obj)
+        v = float(obj)
+        return _safe_float(v)
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
+    elif isinstance(obj, float):
+        return _safe_float(obj)
     elif isinstance(obj, datetime):
         return obj.isoformat()
     elif hasattr(obj, 'item'):
-        return obj.item()
+        return _safe_float(obj.item()) if isinstance(obj.item(), float) else obj.item()
     return obj
+
+# ── Simple in-memory recommendations cache ─────────────────────
+_rec_cache = {}          # {horizon: {'data': [...], 'ts': float}}
+_REC_CACHE_TTL = 60      # seconds – serve cached data if < 60 s old
+_REC_MAX_SYMBOLS = 25    # analyse at most this many symbols per request
 
 # ── Dashboard ───────────────────────────────────────────────────
 
@@ -141,6 +157,143 @@ def liquidate_positions():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ── Manual Buy / Sell ──────────────────────────────────────
+
+@app.route('/api/trade', methods=['POST'])
+def manual_trade():
+    """Place a manual buy or sell order via Alpaca.
+
+    Body JSON:
+        symbol   (str, required) – e.g. "AAPL"
+        side     (str, required) – "buy" or "sell"
+        quantity (int, optional) – number of shares (default: auto-size)
+        order_type (str, optional) – "market" (default) or "limit"
+        limit_price (float, optional) – required when order_type is "limit"
+        horizon  (str, optional) – "WEEK" or "MONTH" (default "WEEK")
+    """
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+
+    data = request.get_json() or {}
+    symbol = (data.get('symbol') or '').upper()
+    side = (data.get('side') or '').lower()
+    if not symbol:
+        return jsonify({'error': 'Symbol is required'}), 400
+    if side not in ('buy', 'sell'):
+        return jsonify({'error': 'Side must be "buy" or "sell"'}), 400
+
+    horizon = (data.get('horizon') or 'WEEK').upper()
+    if horizon not in ('WEEK', 'MONTH'):
+        horizon = 'WEEK'
+    order_type = data.get('order_type', 'market')
+    limit_price = data.get('limit_price')
+
+    try:
+        pm = trading_agent.portfolio_manager
+        broker = pm.broker
+
+        if not broker.is_connected():
+            return jsonify({'error': 'Broker not connected'}), 503
+
+        # ── SELL path: close existing position ──────────────
+        if side == 'sell':
+            if symbol not in pm.positions:
+                # Try Alpaca-only close
+                result = broker.close_position(symbol)
+                if result.get('success'):
+                    trading_agent.notifications.notify_trade_closed(
+                        symbol, 0, 0, 0, 'Manual sell')
+                    return jsonify({'message': f'Closed Alpaca position for {symbol}', **result})
+                return jsonify({'error': f'No open position in {symbol}'}), 400
+
+            pos = pm.positions[symbol]
+            quote = trading_agent.data_provider.get_real_time_quote(symbol)
+            exit_price = quote.get('current_price', pos.current_price) if quote else pos.current_price
+            pos.update_price(exit_price)
+            pnl = pos.unrealized_pnl
+            success = pm.close_position(symbol, exit_price, 'Manual sell')
+            if success:
+                trading_agent.notifications.notify_trade_closed(
+                    symbol, pos.quantity, exit_price, pnl, 'Manual sell')
+                return jsonify({
+                    'message': f'Sold {symbol}',
+                    'exit_price': exit_price,
+                    'pnl': pnl,
+                    'success': True
+                })
+            return jsonify({'error': f'Failed to close position for {symbol}'}), 500
+
+        # ── BUY path ────────────────────────────────────────
+        quote = trading_agent.data_provider.get_real_time_quote(symbol)
+        if not quote or not quote.get('current_price'):
+            return jsonify({'error': f'Cannot get price for {symbol}'}), 400
+
+        current_price = quote['current_price']
+
+        # Auto-size if quantity not given
+        quantity = data.get('quantity')
+        if not quantity:
+            max_pos = pm.config.MAX_POSITION_SIZE
+            quantity = max(1, int(max_pos / current_price))
+
+        quantity = int(quantity)
+        if quantity <= 0:
+            return jsonify({'error': 'Quantity must be > 0'}), 400
+
+        # Pre-check risk limits (return specific reason)
+        position_size = quantity * current_price
+        can_open, reason = pm.can_open_position(symbol, position_size)
+        if not can_open:
+            return jsonify({'error': reason}), 400
+
+        # Get stop-loss / take-profit from strategy analysis
+        stop_loss = 0
+        take_profit = 0
+        try:
+            analysis = trading_agent.trading_strategy.analyze_stock(symbol, horizon=horizon)
+            if analysis and 'recommendation' in analysis:
+                rec = analysis['recommendation']
+                stop_loss = rec.get('stop_loss', 0)
+                take_profit = rec.get('take_profit', 0)
+        except Exception:
+            pass  # proceed without SL/TP
+
+        # Check if market is open to inform user about order timing
+        market_open = broker.is_market_open()
+
+        success = pm.open_position(
+            symbol=symbol, quantity=quantity,
+            entry_price=current_price, position_type='LONG',
+            stop_loss=stop_loss, take_profit=take_profit,
+            horizon=horizon
+        )
+
+        if success:
+            if market_open:
+                msg = f'Bought {quantity} x {symbol} @ ${current_price:.2f}'
+            else:
+                msg = (f'Order for {quantity} x {symbol} queued @ ~${current_price:.2f}. '
+                       f'Market is closed — it will fill at next market open.')
+            trading_agent.notifications.notify_trade_opened(
+                symbol, 'BUY', quantity, current_price, horizon)
+            return jsonify({
+                'message': msg,
+                'symbol': symbol,
+                'quantity': quantity,
+                'price': current_price,
+                'stop_loss': stop_loss,
+                'take_profit': take_profit,
+                'horizon': horizon,
+                'market_open': market_open,
+                'success': True
+            })
+        else:
+            return jsonify({'error': f'Order for {symbol} was rejected by the broker. Check logs for details.'}), 400
+
+    except Exception as e:
+        app.logger.error(f"Manual trade error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/trading-history')
 def get_trading_history():
     if not trading_agent:
@@ -159,7 +312,7 @@ def get_trading_history():
 
 @app.route('/api/returns')
 def get_returns():
-    """Get realised + unrealised returns for 1D / 1W / 1M windows."""
+    """Get realised + unrealised returns for 1W / 1M windows."""
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
     try:
@@ -210,16 +363,24 @@ def remove_from_watchlist():
 
 @app.route('/api/watchlist/recommendations')
 def get_watchlist_recommendations():
-    """Get recommendations for all watchlist symbols (supports horizon query param)."""
+    """Get recommendations for watchlist symbols (cached, limited to fastest N)."""
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
     try:
-        horizon = request.args.get('horizon', 'DAY').upper()
-        if horizon not in ('DAY', 'WEEK', 'MONTH'):
-            horizon = 'DAY'
-        
+        horizon = request.args.get('horizon', 'WEEK').upper()
+        if horizon not in ('WEEK', 'MONTH'):
+            horizon = 'WEEK'
+
+        # ── Return cached data if fresh enough ─────────────────
+        cached = _rec_cache.get(horizon)
+        if cached and (_time.time() - cached['ts']) < _REC_CACHE_TTL:
+            return jsonify({'recommendations': cached['data'],
+                            'horizon': horizon, 'cached': True})
+
+        # ── Build fresh recommendations (limit count) ──────────
+        symbols = list(trading_agent.watchlist)[:_REC_MAX_SYMBOLS]
         recommendations = []
-        for symbol in trading_agent.watchlist:
+        for symbol in symbols:
             try:
                 analysis = trading_agent.analyze_symbol(symbol, horizon=horizon)
                 if analysis and 'recommendation' in analysis:
@@ -248,8 +409,12 @@ def get_watchlist_recommendations():
                     'horizon': horizon,
                     'timestamp': datetime.now()
                 })
-        
+
         recommendations = convert_numpy_types(recommendations)
+
+        # ── Store in cache ─────────────────────────────────────
+        _rec_cache[horizon] = {'data': recommendations, 'ts': _time.time()}
+
         return jsonify({'recommendations': recommendations, 'horizon': horizon})
     except Exception as e:
         app.logger.error(f"Error getting watchlist recommendations: {e}")
@@ -262,7 +427,7 @@ def analyze_symbol(symbol):
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
     try:
-        horizon = request.args.get('horizon', 'DAY').upper()
+        horizon = request.args.get('horizon', 'WEEK').upper()
         analysis = trading_agent.analyze_symbol(symbol.upper(), horizon=horizon)
         analysis = convert_numpy_types(analysis)
         return jsonify(analysis)
@@ -305,8 +470,6 @@ def get_config():
         config_dict = {
             'MAX_PORTFOLIO_VALUE': config.MAX_PORTFOLIO_VALUE,
             'MAX_POSITION_SIZE': config.MAX_POSITION_SIZE,
-            'DAY_STOP_LOSS_PCT': config.DAY_STOP_LOSS_PCT,
-            'DAY_TAKE_PROFIT_PCT': config.DAY_TAKE_PROFIT_PCT,
             'WEEK_STOP_LOSS_PCT': config.WEEK_STOP_LOSS_PCT,
             'WEEK_TAKE_PROFIT_PCT': config.WEEK_TAKE_PROFIT_PCT,
             'MONTH_STOP_LOSS_PCT': config.MONTH_STOP_LOSS_PCT,
@@ -372,7 +535,7 @@ def screen_stocks():
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
     try:
-        screen_type = request.args.get('type', 'day_trading')
+        screen_type = request.args.get('type', 'swing')
         max_stocks = request.args.get('max_stocks', 25, type=int)
         screened_stocks = trading_agent.screen_stocks_manual(screen_type, max_stocks)
         return jsonify({

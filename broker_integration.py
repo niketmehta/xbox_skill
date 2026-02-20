@@ -92,8 +92,9 @@ class AlpacaBroker:
             return []
     
     def place_order(self, symbol: str, quantity: int, side: str, 
-                   order_type: str = 'market', time_in_force: str = 'day',
-                   limit_price: float = None, stop_price: float = None) -> Dict:
+                   order_type: str = 'market', time_in_force: str = 'gtc',
+                   limit_price: float = None, stop_price: float = None,
+                   extended_hours: bool = False) -> Dict:
         """
         Place an order
         
@@ -119,10 +120,14 @@ class AlpacaBroker:
             }
             
             if limit_price and order_type in ['limit', 'stop_limit']:
-                order_data['limit_price'] = limit_price
+                order_data['limit_price'] = round(limit_price, 2)
             
             if stop_price and order_type in ['stop', 'stop_limit']:
-                order_data['stop_price'] = stop_price
+                order_data['stop_price'] = round(stop_price, 2)
+
+            # Extended-hours flag only valid for limit orders with 'day' TIF
+            if extended_hours and order_type == 'limit' and time_in_force == 'day':
+                order_data['extended_hours'] = True
             
             order = self.api.submit_order(**order_data)
             
@@ -149,7 +154,8 @@ class AlpacaBroker:
                           limit_price: float = None, stop_loss: float = None,
                           take_profit: float = None) -> Dict:
         """
-        Place a bracket order with stop loss and take profit
+        Place a bracket order with stop loss and take profit.
+        Prices are rounded to 2 decimal places (Alpaca rejects sub-penny).
         """
         if not self.api:
             return {'error': 'Not connected to broker'}
@@ -160,19 +166,19 @@ class AlpacaBroker:
                 'qty': quantity,
                 'side': side,
                 'type': 'market',
-                'time_in_force': 'day'
+                'time_in_force': 'day'   # bracket orders require 'day'
             }
             
-            # Add bracket orders if specified
+            # Add bracket orders if specified (round to cents)
             if stop_loss or take_profit:
                 order_class = 'bracket'
                 order_data['order_class'] = order_class
                 
                 if stop_loss:
-                    order_data['stop_loss'] = {'stop_price': stop_loss}
+                    order_data['stop_loss'] = {'stop_price': round(stop_loss, 2)}
                 
                 if take_profit:
-                    order_data['take_profit'] = {'limit_price': take_profit}
+                    order_data['take_profit'] = {'limit_price': round(take_profit, 2)}
             
             order = self.api.submit_order(**order_data)
             
@@ -241,7 +247,9 @@ class AlpacaBroker:
             return []
     
     def close_position(self, symbol: str, quantity: int = None) -> Dict:
-        """Close a position (sell all or specified quantity)"""
+        """Close a position (sell all or specified quantity).
+        Uses GTC time-in-force so orders are accepted even outside market hours.
+        """
         if not self.api:
             return {'error': 'Not connected to broker'}
         
@@ -253,11 +261,30 @@ class AlpacaBroker:
                     qty=quantity,
                     side='sell',
                     type='market',
-                    time_in_force='day'
+                    time_in_force='gtc'
                 )
             else:
-                # Close entire position
-                result = self.api.close_position(symbol)
+                # Close entire position via Alpaca position API
+                try:
+                    result = self.api.close_position(symbol)
+                except Exception as close_err:
+                    # Fallback: get qty from Alpaca positions and submit GTC sell
+                    self.logger.warning(
+                        f"close_position API failed for {symbol}: {close_err}. "
+                        f"Falling back to GTC market sell."
+                    )
+                    positions = self.api.list_positions()
+                    qty = None
+                    for p in positions:
+                        if p.symbol == symbol:
+                            qty = int(p.qty)
+                            break
+                    if not qty:
+                        raise close_err  # re-raise original
+                    result = self.api.submit_order(
+                        symbol=symbol, qty=qty, side='sell',
+                        type='market', time_in_force='gtc'
+                    )
             
             self.logger.info(f"Position closed: {symbol}")
             

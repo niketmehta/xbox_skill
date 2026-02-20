@@ -93,7 +93,7 @@ class NotificationService:
     # ── High-level notification methods ─────────────────────────────
 
     def notify_trade_opened(self, symbol: str, side: str, quantity: int,
-                            price: float, horizon: str = 'DAY'):
+                            price: float, horizon: str = 'WEEK'):
         body = (
             f"📈 TRADE OPENED\n"
             f"{side.upper()} {quantity} x {symbol} @ ${price:.2f}\n"
@@ -115,7 +115,7 @@ class NotificationService:
         self._send_sms(body)
 
     def notify_signal(self, symbol: str, action: str, confidence: float,
-                      price: float, horizon: str = 'DAY'):
+                      price: float, horizon: str = 'WEEK'):
         body = (
             f"🔔 SIGNAL: {action} {symbol}\n"
             f"Confidence: {confidence:.1f}%\n"
