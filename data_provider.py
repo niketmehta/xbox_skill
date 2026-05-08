@@ -1,15 +1,27 @@
-import yfinance as yf
 import pandas as pd
 import numpy as np
 import requests
-import json
 from datetime import datetime, timedelta
-import time
 from typing import Dict, List, Optional, Tuple
 import logging
 from config import Config
 import pytz
 import re
+
+try:
+    import alpaca_trade_api as tradeapi
+except ImportError:
+    tradeapi = None
+
+_yf = None
+
+
+def _get_yfinance():
+    global _yf
+    if _yf is None:
+        import yfinance as yf
+        _yf = yf
+    return _yf
 
 
 class MarketDataProvider:
@@ -26,11 +38,16 @@ class MarketDataProvider:
     MOVERS_CACHE_TTL = 180       # 3 minutes for market movers
     VIX_CACHE_TTL = 300          # 5 minutes for VIX / market regime
     FUNDAMENTALS_CACHE_TTL = 600 # 10 minutes for fundamentals
+    HISTORY_CACHE_TTL = 900      # 15 minutes for daily / weekly candles
 
     def __init__(self):
         self.config = Config()
         self.logger = logging.getLogger(__name__)
         self.eastern_tz = pytz.timezone('US/Eastern')
+        self._http = requests.Session()
+        self._http.headers.update({
+            'User-Agent': 'Mozilla/5.0 trading-agent/1.0'
+        })
 
         # ── Caches ───────────────────────────────────────────
         # Quote cache:  symbol -> {data: dict, ts: datetime}
@@ -46,6 +63,10 @@ class MarketDataProvider:
         # SPY data for relative-strength calculations
         self._spy_cache: Dict[str, pd.DataFrame] = {}
         self._spy_cache_time: Dict[str, datetime] = {}
+        # Historical candle cache: (source, symbol, period, interval) -> {data, ts}
+        self._history_cache: Dict[Tuple[str, str, str, str], Dict] = {}
+        self._yahoo_blocked_until: Optional[datetime] = None
+        self._alpaca_api = None
 
     def _cache_valid(self, ts: Optional[datetime], ttl: float) -> bool:
         """Check if a cached entry is still valid."""
@@ -61,6 +82,241 @@ class MarketDataProvider:
         ]
         return any(re.search(p, msg, re.IGNORECASE) for p in patterns)
 
+    def _prefer_yahoo(self) -> bool:
+        if not self.config.USE_YAHOO_FINANCE:
+            return False
+        if self.config.MARKET_DATA_PRIMARY in ('stooq', 'alpaca', 'alpha_vantage'):
+            return False
+        if self._yahoo_blocked_until and datetime.now() < self._yahoo_blocked_until:
+            return False
+        return True
+
+    def _prefer_alpaca(self) -> bool:
+        return (
+            self.config.USE_ALPACA_MARKET_DATA
+            and self.config.MARKET_DATA_PRIMARY == 'alpaca'
+            and bool(self.config.ALPACA_API_KEY)
+            and bool(self.config.ALPACA_SECRET_KEY)
+        )
+
+    def _mark_yahoo_rate_limited(self, reason: str):
+        cooldown = max(self.config.YAHOO_COOLDOWN_SECONDS, 60)
+        self._yahoo_blocked_until = datetime.now() + timedelta(seconds=cooldown)
+        self.logger.warning(
+            "Yahoo rate-limited/unavailable; using fallback for %s seconds. Reason: %s",
+            cooldown,
+            reason,
+        )
+
+    def _history_cache_get(self, source: str, symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
+        key = (source, symbol.upper(), period, interval)
+        cached = self._history_cache.get(key)
+        if cached and self._cache_valid(cached.get('ts'), self.HISTORY_CACHE_TTL):
+            return cached.get('data')
+        return None
+
+    def _history_cache_set(self, source: str, symbol: str, period: str, interval: str, data: pd.DataFrame):
+        key = (source, symbol.upper(), period, interval)
+        self._history_cache[key] = {'data': data, 'ts': datetime.now()}
+
+    def _stooq_symbol(self, symbol: str) -> str:
+        symbol = symbol.strip().lower().replace('-', '.')
+        if symbol.startswith('^'):
+            return symbol[1:]
+        if symbol in ('spy', 'qqq', 'iwm', 'dia') or re.match(r'^[a-z.]+$', symbol):
+            return f"{symbol}.us"
+        return symbol
+
+    def _period_start(self, period: str) -> datetime:
+        period = (period or '3mo').lower()
+        amount = int(re.sub(r'\D', '', period) or 1)
+        if period.endswith('d'):
+            return datetime.now() - timedelta(days=amount + 5)
+        if period.endswith('mo'):
+            return datetime.now() - timedelta(days=amount * 31 + 10)
+        if period.endswith('y'):
+            return datetime.now() - timedelta(days=amount * 366 + 10)
+        return datetime.now() - timedelta(days=120)
+
+    def _get_alpaca_api(self):
+        if self._alpaca_api is not None:
+            return self._alpaca_api
+        if tradeapi is None:
+            self.logger.warning("alpaca-trade-api is not installed")
+            return None
+        if not self.config.ALPACA_API_KEY or not self.config.ALPACA_SECRET_KEY:
+            return None
+
+        self._alpaca_api = tradeapi.REST(
+            key_id=self.config.ALPACA_API_KEY,
+            secret_key=self.config.ALPACA_SECRET_KEY,
+            base_url=self.config.ALPACA_BASE_URL,
+            api_version='v2',
+        )
+        return self._alpaca_api
+
+    def _alpaca_timeframe(self, interval: str):
+        if tradeapi is None:
+            return None
+        interval = (interval or '1d').lower()
+        if interval in ('1wk', '1w', 'wk'):
+            return tradeapi.TimeFrame.Week
+        if interval in ('1d', 'd', 'day'):
+            return tradeapi.TimeFrame.Day
+        match = re.match(r'^(\d+)m$', interval)
+        if match:
+            return tradeapi.TimeFrame(int(match.group(1)), tradeapi.TimeFrameUnit.Minute)
+        if interval in ('1h', '60m'):
+            return tradeapi.TimeFrame.Hour
+        return tradeapi.TimeFrame.Day
+
+    def _fetch_alpaca_history(self, symbol: str, period: str = '3mo', interval: str = '1d') -> pd.DataFrame:
+        cached = self._history_cache_get('alpaca', symbol, period, interval)
+        if cached is not None:
+            return cached.copy()
+        if symbol.startswith('^'):
+            return pd.DataFrame()
+
+        api = self._get_alpaca_api()
+        timeframe = self._alpaca_timeframe(interval)
+        if api is None or timeframe is None:
+            return pd.DataFrame()
+
+        start = self._period_start(period).strftime('%Y-%m-%dT%H:%M:%SZ')
+        try:
+            kwargs = {
+                'start': start,
+                'adjustment': 'all',
+            }
+            if self.config.ALPACA_DATA_FEED:
+                kwargs['feed'] = self.config.ALPACA_DATA_FEED
+            bars = api.get_bars(symbol, timeframe, **kwargs)
+            data = bars.df
+            if data is None or data.empty:
+                return pd.DataFrame()
+
+            if 'symbol' in data.columns:
+                data = data[data['symbol'] == symbol.upper()]
+            rename = {
+                'open': 'Open',
+                'high': 'High',
+                'low': 'Low',
+                'close': 'Close',
+                'volume': 'Volume',
+            }
+            data = data.rename(columns=rename)
+            keep = [col for col in ['Open', 'High', 'Low', 'Close', 'Volume'] if col in data.columns]
+            data = data[keep].copy()
+            if not isinstance(data.index, pd.DatetimeIndex):
+                data.index = pd.to_datetime(data.index)
+            if getattr(data.index, 'tz', None) is not None:
+                data.index = data.index.tz_convert(None)
+            data = data.sort_index()
+            for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                if col in data.columns:
+                    data[col] = pd.to_numeric(data[col], errors='coerce')
+            data = data.dropna(subset=['Open', 'High', 'Low', 'Close'])
+            if 'Volume' not in data.columns:
+                data['Volume'] = 0
+            data['Volume'] = data['Volume'].fillna(0)
+            if not data.empty:
+                self._history_cache_set('alpaca', symbol, period, interval, data)
+            return data.copy()
+        except Exception as e:
+            self.logger.error(f"Error fetching Alpaca data for {symbol}: {e}")
+            return pd.DataFrame()
+
+    def _fetch_stooq_history(self, symbol: str, period: str = '3mo', interval: str = '1d') -> pd.DataFrame:
+        cached = self._history_cache_get('stooq', symbol, period, interval)
+        if cached is not None:
+            return cached.copy()
+        if not self.config.STOOQ_API_KEY:
+            self.logger.debug("Stooq fallback skipped because STOOQ_API_KEY is not configured")
+            return pd.DataFrame()
+
+        start = self._period_start(period).strftime('%Y%m%d')
+        end = datetime.now().strftime('%Y%m%d')
+        stooq_interval = 'w' if interval in ('1wk', '1w', 'wk') else 'd'
+        stooq_symbol = self._stooq_symbol(symbol)
+        url = 'https://stooq.com/q/d/l/'
+        params = {
+            's': stooq_symbol,
+            'd1': start,
+            'd2': end,
+            'i': stooq_interval,
+            'apikey': self.config.STOOQ_API_KEY,
+        }
+
+        try:
+            response = self._http.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            text = response.text.strip()
+            if not text or text.lower().startswith('no data'):
+                self.logger.warning(f"No Stooq data returned for {symbol}")
+                return pd.DataFrame()
+
+            from io import StringIO
+            data = pd.read_csv(StringIO(text))
+            if data.empty or 'Date' not in data.columns:
+                return pd.DataFrame()
+            data['Date'] = pd.to_datetime(data['Date'])
+            data = data.set_index('Date').sort_index()
+            numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            for col in numeric_cols:
+                if col in data.columns:
+                    data[col] = pd.to_numeric(data[col], errors='coerce')
+            data = data.dropna(subset=['Open', 'High', 'Low', 'Close'])
+            if 'Volume' not in data.columns:
+                data['Volume'] = 0
+            data['Volume'] = data['Volume'].fillna(0)
+            self._history_cache_set('stooq', symbol, period, interval, data)
+            return data.copy()
+        except Exception as e:
+            self.logger.error(f"Error fetching Stooq data for {symbol}: {e}")
+            return pd.DataFrame()
+
+    def _fetch_yahoo_history(self, symbol: str, period: str, interval: str, prepost: bool = False) -> pd.DataFrame:
+        cached = self._history_cache_get('yahoo', symbol, period, interval)
+        if cached is not None:
+            return cached.copy()
+        ticker = _get_yfinance().Ticker(symbol)
+        data = ticker.history(period=period, interval=interval, prepost=prepost)
+        if not data.empty:
+            self._history_cache_set('yahoo', symbol, period, interval, data)
+        return data
+
+    def _get_history(self, symbol: str, period: str, interval: str, prepost: bool = False) -> pd.DataFrame:
+        if self._prefer_alpaca():
+            data = self._fetch_alpaca_history(symbol, period=period, interval=interval)
+            if not data.empty:
+                return data
+
+        if self.config.MARKET_DATA_PRIMARY == 'stooq' and self.config.USE_STOOQ_FALLBACK:
+            data = self._fetch_stooq_history(symbol, period=period, interval=interval)
+            if not data.empty:
+                return data
+
+        if self._prefer_yahoo():
+            try:
+                data = self._fetch_yahoo_history(symbol, period, interval, prepost=prepost)
+                if not data.empty:
+                    return data
+            except Exception as e:
+                if self._is_rate_limit_error(e):
+                    self._mark_yahoo_rate_limited(str(e))
+                else:
+                    self.logger.error(f"Error getting Yahoo history for {symbol}: {e}")
+
+        if self.config.USE_ALPACA_MARKET_DATA:
+            data = self._fetch_alpaca_history(symbol, period=period, interval=interval)
+            if not data.empty:
+                return data
+
+        if self.config.USE_STOOQ_FALLBACK:
+            return self._fetch_stooq_history(symbol, period=period, interval=interval)
+
+        return pd.DataFrame()
+
     # ── Real-time quote (cached) ─────────────────────────────────────
     def get_real_time_quote(self, symbol: str) -> Dict:
         """Get real-time quote for a symbol (with 2-minute cache)."""
@@ -69,48 +325,147 @@ class MarketDataProvider:
         if cached and self._cache_valid(cached.get('_cache_ts'), self.QUOTE_CACHE_TTL):
             return cached
 
+        if self._prefer_alpaca():
+            quote = self._get_alpaca_quote(symbol)
+            if quote:
+                self._quote_cache[symbol] = quote
+                return quote
+
+        if self._prefer_yahoo():
+            try:
+                ticker = _get_yfinance().Ticker(symbol)
+                info = ticker.info
+
+                current_price = info.get('currentPrice', info.get('regularMarketPrice', 0))
+                previous_close = info.get('previousClose', 0)
+
+                quote = {
+                    'symbol': symbol,
+                    'current_price': current_price,
+                    'previous_close': previous_close,
+                    'change': current_price - previous_close if current_price and previous_close else 0,
+                    'change_percent': ((current_price - previous_close) / previous_close * 100) if previous_close else 0,
+                    'volume': info.get('volume', 0),
+                    'avg_volume': info.get('averageVolume', 0),
+                    'market_cap': info.get('marketCap', 0),
+                    'bid': info.get('bid', 0),
+                    'ask': info.get('ask', 0),
+                    'timestamp': datetime.now(),
+                    '_cache_ts': datetime.now(),
+                    'source': 'yahoo',
+                }
+
+                self._quote_cache[symbol] = quote
+                return quote
+
+            except Exception as e:
+                if self._is_rate_limit_error(e):
+                    self.logger.error(f"RATE LIMIT: quote for {symbol}: {e}")
+                    self._mark_yahoo_rate_limited(str(e))
+                    if cached:
+                        self.logger.info(f"Returning stale cache for {symbol}")
+                        return cached
+                else:
+                    self.logger.error(f"Error getting quote for {symbol}: {e}")
+
+        if self.config.USE_ALPACA_MARKET_DATA:
+            quote = self._get_alpaca_quote(symbol)
+            if quote:
+                self._quote_cache[symbol] = quote
+                return quote
+
+        if self.config.USE_STOOQ_FALLBACK:
+            quote = self._get_stooq_quote(symbol)
+            if quote:
+                self._quote_cache[symbol] = quote
+                return quote
+
+        return {}
+
+    def _get_alpaca_quote(self, symbol: str) -> Dict:
+        """Get the latest available quote-like snapshot from Alpaca bars."""
+        data = self._fetch_alpaca_history(symbol, period='10d', interval='1d')
+        return self._quote_from_history(symbol, data, source='alpaca') if not data.empty else {}
+
+    def _get_stooq_quote(self, symbol: str) -> Dict:
+        """Get a delayed quote from Stooq daily candles."""
         try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.info
-
-            current_price = info.get('currentPrice', info.get('regularMarketPrice', 0))
-            previous_close = info.get('previousClose', 0)
-
-            quote = {
+            data = self._fetch_stooq_history(symbol, period='10d', interval='1d')
+            if data.empty:
+                return {}
+            last = data.iloc[-1]
+            prev = data.iloc[-2] if len(data) >= 2 else last
+            current_price = float(last['Close'])
+            previous_close = float(prev['Close'])
+            volume = int(last.get('Volume', 0) or 0)
+            return {
                 'symbol': symbol,
                 'current_price': current_price,
                 'previous_close': previous_close,
-                'change': current_price - previous_close if current_price and previous_close else 0,
+                'change': current_price - previous_close if previous_close else 0,
                 'change_percent': ((current_price - previous_close) / previous_close * 100) if previous_close else 0,
-                'volume': info.get('volume', 0),
-                'avg_volume': info.get('averageVolume', 0),
-                'market_cap': info.get('marketCap', 0),
-                'bid': info.get('bid', 0),
-                'ask': info.get('ask', 0),
+                'volume': volume,
+                'avg_volume': int(data['Volume'].tail(20).mean()) if 'Volume' in data.columns and not data.empty else 0,
+                'market_cap': 0,
+                'bid': 0,
+                'ask': 0,
                 'timestamp': datetime.now(),
                 '_cache_ts': datetime.now(),
+                'source': 'stooq',
             }
-
-            self._quote_cache[symbol] = quote
-            return quote
-
         except Exception as e:
-            if self._is_rate_limit_error(e):
-                self.logger.error(f"RATE LIMIT: quote for {symbol}: {e}")
-                # Return stale cache if available during rate-limit
-                if cached:
-                    self.logger.info(f"Returning stale cache for {symbol}")
-                    return cached
-            else:
-                self.logger.error(f"Error getting quote for {symbol}: {e}")
+            self.logger.error(f"Error getting Stooq quote for {symbol}: {e}")
             return {}
+
+    def _get_alpha_vantage_quote(self, symbol: str) -> Dict:
+        """Optional Alpha Vantage quote fallback, limited by free API quotas."""
+        if not self.config.ALPHA_VANTAGE_API_KEY:
+            return {}
+        try:
+            response = self._http.get(
+                'https://www.alphavantage.co/query',
+                params={
+                    'function': 'GLOBAL_QUOTE',
+                    'symbol': symbol,
+                    'apikey': self.config.ALPHA_VANTAGE_API_KEY,
+                },
+                timeout=15,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            quote = payload.get('Global Quote', {})
+            if not quote:
+                return {}
+            current_price = float(quote.get('05. price') or 0)
+            previous_close = float(quote.get('08. previous close') or 0)
+            volume = int(float(quote.get('06. volume') or 0))
+            return {
+                'symbol': symbol,
+                'current_price': current_price,
+                'previous_close': previous_close,
+                'change': current_price - previous_close if previous_close else 0,
+                'change_percent': ((current_price - previous_close) / previous_close * 100) if previous_close else 0,
+                'volume': volume,
+                'avg_volume': 0,
+                'market_cap': 0,
+                'bid': 0,
+                'ask': 0,
+                'timestamp': datetime.now(),
+                '_cache_ts': datetime.now(),
+                'source': 'alpha_vantage',
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting Alpha Vantage quote for {symbol}: {e}")
+            return {}
+
+    def get_real_time_quote_alpha(self, symbol: str) -> Dict:
+        return self._get_alpha_vantage_quote(symbol)
 
     # ── Daily data (for WEEK / swing trading) ───────────────────────
     def get_daily_data(self, symbol: str, period: str = "3mo") -> pd.DataFrame:
         """Get daily candles for swing-trade / weekly analysis."""
         try:
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period=period, interval="1d")
+            data = self._get_history(symbol, period=period, interval="1d")
 
             if data.empty:
                 self.logger.warning(f"No daily data returned for {symbol}")
@@ -130,8 +485,7 @@ class MarketDataProvider:
     def get_weekly_data(self, symbol: str, period: str = "1y") -> pd.DataFrame:
         """Get weekly candles for position-trade / monthly analysis."""
         try:
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period=period, interval="1wk")
+            data = self._get_history(symbol, period=period, interval="1wk")
 
             if data.empty:
                 self.logger.warning(f"No weekly data returned for {symbol}")
@@ -151,8 +505,7 @@ class MarketDataProvider:
     def get_intraday_data(self, symbol: str, period: str = "5d", interval: str = "5m") -> pd.DataFrame:
         """Get intraday data (for chart display only, not for trading signals)."""
         try:
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period=period, interval=interval, prepost=True)
+            data = self._get_history(symbol, period=period, interval=interval, prepost=True)
             if data.empty:
                 return pd.DataFrame()
             data = self._add_technical_indicators(data)
@@ -175,8 +528,7 @@ class MarketDataProvider:
 
         default = {'vix': 20, 'regime': 'NORMAL', 'position_multiplier': 0.8}
         try:
-            vix_ticker = yf.Ticker('^VIX')
-            vix_data = vix_ticker.history(period='5d', interval='1d')
+            vix_data = self._get_history('^VIX', period='5d', interval='1d')
             if vix_data.empty:
                 return self._regime_cache or default
 
@@ -217,16 +569,14 @@ class MarketDataProvider:
             now = datetime.now()
             if (cache_key not in self._spy_cache or
                     (now - self._spy_cache_time.get(cache_key, datetime.min)).total_seconds() > 1800):
-                spy = yf.Ticker('SPY')
-                self._spy_cache[cache_key] = spy.history(period=period, interval='1d')
+                self._spy_cache[cache_key] = self._get_history('SPY', period=period, interval='1d')
                 self._spy_cache_time[cache_key] = now
 
             spy_data = self._spy_cache[cache_key]
             if spy_data.empty:
                 return {}
 
-            stock = yf.Ticker(symbol)
-            stock_data = stock.history(period=period, interval='1d')
+            stock_data = self._get_history(symbol, period=period, interval='1d')
             if stock_data.empty or len(stock_data) < 5:
                 return {}
 
@@ -248,8 +598,10 @@ class MarketDataProvider:
     # ── Earnings calendar ───────────────────────────────────────────
     def get_next_earnings_date(self, symbol: str) -> Optional[datetime]:
         """Return the next earnings date for a symbol, or None."""
+        if not self._prefer_yahoo():
+            return None
         try:
-            ticker = yf.Ticker(symbol)
+            ticker = _get_yfinance().Ticker(symbol)
             cal = ticker.calendar
             if cal is not None and not cal.empty:
                 # yfinance returns a DataFrame with 'Earnings Date' rows
@@ -289,49 +641,54 @@ class MarketDataProvider:
 
         try:
             symbols = self.MOVERS_SYMBOLS[:count]
-            # Use yf.download for a single batch HTTP request instead of N calls
-            batch = yf.download(symbols, period='2d', interval='1d',
-                                group_by='ticker', progress=False, threads=True)
+            if self._prefer_yahoo():
+                try:
+                    # Use one batch HTTP request instead of N calls
+                    batch = _get_yfinance().download(
+                        symbols,
+                        period='2d',
+                        interval='1d',
+                        group_by='ticker',
+                        progress=False,
+                        threads=True,
+                    )
+                except Exception as e:
+                    if self._is_rate_limit_error(e):
+                        self._mark_yahoo_rate_limited(str(e))
+                    else:
+                        self.logger.error(f"Error getting Yahoo market movers: {e}")
+                    batch = pd.DataFrame()
+            else:
+                batch = pd.DataFrame()
 
             movers = []
-            for sym in symbols:
-                try:
-                    if len(symbols) == 1:
-                        df = batch
-                    else:
-                        df = batch[sym] if sym in batch.columns.get_level_values(0) else None
-                    if df is None or df.empty or len(df) < 2:
+            if not batch.empty:
+                for sym in symbols:
+                    try:
+                        if len(symbols) == 1:
+                            df = batch
+                        else:
+                            df = batch[sym] if sym in batch.columns.get_level_values(0) else None
+                        quote = self._quote_from_history(sym, df, source='yahoo_batch')
+                        if quote:
+                            self._quote_cache[sym] = quote
+                            movers.append(quote)
+                    except Exception:
                         continue
 
-                    current_price = float(df['Close'].iloc[-1])
-                    previous_close = float(df['Close'].iloc[-2])
-                    volume = int(df['Volume'].iloc[-1]) if not pd.isna(df['Volume'].iloc[-1]) else 0
-
-                    if previous_close == 0:
-                        continue
-
-                    change = current_price - previous_close
-                    change_pct = (change / previous_close) * 100
-
-                    quote = {
-                        'symbol': sym,
-                        'current_price': current_price,
-                        'previous_close': previous_close,
-                        'change': change,
-                        'change_percent': change_pct,
-                        'volume': volume,
-                        'avg_volume': 0,
-                        'market_cap': 0,
-                        'bid': 0, 'ask': 0,
-                        'timestamp': datetime.now(),
-                        '_cache_ts': datetime.now(),
-                    }
-                    # Also populate the quote cache so other calls benefit
-                    self._quote_cache[sym] = quote
-                    if abs(change_pct) > 0:
+            if not movers and self.config.USE_ALPACA_MARKET_DATA:
+                for sym in symbols:
+                    quote = self._get_alpaca_quote(sym)
+                    if quote:
+                        self._quote_cache[sym] = quote
                         movers.append(quote)
-                except Exception:
-                    continue
+
+            if not movers and self.config.USE_STOOQ_FALLBACK:
+                for sym in symbols:
+                    quote = self._get_stooq_quote(sym)
+                    if quote:
+                        self._quote_cache[sym] = quote
+                        movers.append(quote)
 
             movers.sort(key=lambda x: abs(x.get('change_percent', 0)), reverse=True)
             self._movers_cache = movers
@@ -344,6 +701,32 @@ class MarketDataProvider:
             if self._movers_cache is not None:
                 return self._movers_cache[:count]
             return []
+
+    def _quote_from_history(self, symbol: str, df: Optional[pd.DataFrame], source: str) -> Dict:
+        if df is None or df.empty or len(df) < 2:
+            return {}
+        current_price = float(df['Close'].iloc[-1])
+        previous_close = float(df['Close'].iloc[-2])
+        volume = int(df['Volume'].iloc[-1]) if 'Volume' in df.columns and not pd.isna(df['Volume'].iloc[-1]) else 0
+        if previous_close == 0:
+            return {}
+        change = current_price - previous_close
+        change_pct = (change / previous_close) * 100
+        return {
+            'symbol': symbol,
+            'current_price': current_price,
+            'previous_close': previous_close,
+            'change': change,
+            'change_percent': change_pct,
+            'volume': volume,
+            'avg_volume': 0,
+            'market_cap': 0,
+            'bid': 0,
+            'ask': 0,
+            'timestamp': datetime.now(),
+            '_cache_ts': datetime.now(),
+            'source': source,
+        }
 
     # ── Technical indicators ────────────────────────────────────────
     def _add_technical_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -484,8 +867,34 @@ class MarketDataProvider:
         if cached and self._cache_valid(cached.get('_cache_ts'), self.FUNDAMENTALS_CACHE_TTL):
             return cached
 
+        if not self._prefer_yahoo():
+            return {
+                'pe_ratio': 0,
+                'forward_pe': 0,
+                'peg_ratio': 0,
+                'price_to_book': 0,
+                'debt_to_equity': 0,
+                'return_on_equity': 0,
+                'profit_margin': 0,
+                'revenue_growth': 0,
+                'earnings_growth': 0,
+                'beta': 0,
+                'dividend_yield': 0,
+                'market_cap': 0,
+                'enterprise_value': 0,
+                'shares_outstanding': 0,
+                'float_shares': 0,
+                'short_ratio': 0,
+                'short_percent_of_float': 0,
+                'current_ratio': 0,
+                'operating_margins': 0,
+                'sector': 'Unknown',
+                'industry': 'Unknown',
+                '_cache_ts': datetime.now(),
+            }
+
         try:
-            ticker = yf.Ticker(symbol)
+            ticker = _get_yfinance().Ticker(symbol)
             info = ticker.info
 
             fundamentals = {

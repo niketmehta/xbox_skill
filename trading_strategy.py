@@ -226,7 +226,7 @@ class TradingStrategy:
                 score -= 1
                 reasons.append("Downtrend detected (lower highs)")
 
-        if score >= 3:
+        if score >= 2:
             signal = 'BUY'
         elif score <= -2:
             signal = 'SELL'
@@ -308,9 +308,9 @@ class TradingStrategy:
             score -= 1
             reasons.append(f"Significantly above SMA20 ({distance_from_sma:.1f}%)")
 
-        if score >= 3:
+        if score >= 2:
             signal = 'BUY'
-        elif score <= -3:
+        elif score <= -2:
             signal = 'SELL'
         else:
             signal = 'HOLD'
@@ -553,7 +553,7 @@ class TradingStrategy:
                 score -= 1
                 reasons.append(f"Small cap (${mc/1e6:.0f}M)")
 
-            if score >= 3:
+            if score >= 2:
                 signal = 'BUY'
             elif score <= -2:
                 signal = 'SELL'
@@ -671,12 +671,11 @@ class TradingStrategy:
         }
 
         weighted_score = sum(
-            signals[name] * weights[name] * (strategies[name].get('strength', 0) / 100)
+            signals[name] * weights[name] * max(strategies[name].get('strength', 0) / 100, 0.5)
             for name in strategies
         )
 
-        # Threshold
-        threshold = 0.18
+        threshold = 0.12
 
         if weighted_score > threshold:
             final_signal = 'BUY'
@@ -685,13 +684,12 @@ class TradingStrategy:
         else:
             final_signal = 'HOLD'
 
-        # Require at least 3 strategies to agree (stricter with 6 legs)
         buy_count = sum(1 for v in signals.values() if v > 0)
         sell_count = sum(1 for v in signals.values() if v < 0)
 
-        if final_signal == 'BUY' and buy_count < 3:
+        if final_signal == 'BUY' and buy_count < 2:
             final_signal = 'HOLD'
-        if final_signal == 'SELL' and sell_count < 3:
+        if final_signal == 'SELL' and sell_count < 2:
             final_signal = 'HOLD'
 
         if abs(weighted_score) > 0.12:
@@ -838,16 +836,16 @@ class TradingStrategy:
 
         recommended_size = base_position_size * risk_mult * strength_mult * regime_mult
 
-        # Stop / take-profit prices
-        stop_loss_price = 0
-        take_profit_price = 0
-
-        if signal == 'BUY' and current_price:
-            stop_loss_price = current_price - stop_loss_distance
-            take_profit_price = current_price + take_profit_distance
-        elif signal == 'SELL' and current_price:
+        # Stop / take-profit prices (always compute so HOLD signals show levels too)
+        if signal == 'SELL' and current_price:
             stop_loss_price = current_price + stop_loss_distance
             take_profit_price = current_price - take_profit_distance
+        elif current_price:
+            stop_loss_price = current_price - stop_loss_distance
+            take_profit_price = current_price + take_profit_distance
+        else:
+            stop_loss_price = 0
+            take_profit_price = 0
 
         return {
             'action': signal,

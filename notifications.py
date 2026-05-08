@@ -1,154 +1,211 @@
 """
-SMS notification service using Twilio.
+Notification service using OpenClaw WhatsApp.
 
 Sends alerts for:
   - Trade executions (open / close)
   - High-confidence BUY / SELL signals
   - Stop-loss / take-profit triggers
-  - Risk alerts (daily loss limit, drawdown)
+  - Risk alerts
+  - Trading council digests
 """
 
 import logging
+import os
+import shutil
+import subprocess
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
+
 from config import Config
 
 logger = logging.getLogger(__name__)
 
 
 class NotificationService:
-    """Thin wrapper around Twilio SMS."""
+    """Thin wrapper around OpenClaw WhatsApp delivery."""
 
     def __init__(self):
         self.config = Config()
-        self._client = None
-        self._enabled = self.config.NOTIFICATIONS_ENABLED
-        self._phone = self.config.NOTIFICATION_PHONE_NUMBER
-        self._from = self.config.TWILIO_FROM_NUMBER
-        self._init_twilio()
-
-    # ── Setup ───────────────────────────────────────────────────────
-
-    def _init_twilio(self):
-        """Lazily initialise Twilio client. Silently disable if creds missing."""
-        if not (self.config.TWILIO_ACCOUNT_SID and self.config.TWILIO_AUTH_TOKEN):
-            logger.warning("Twilio credentials not configured – SMS notifications disabled")
-            self._enabled = False
-            return
-        try:
-            from twilio.rest import Client
-            self._client = Client(
-                self.config.TWILIO_ACCOUNT_SID,
-                self.config.TWILIO_AUTH_TOKEN
-            )
-            logger.info("Twilio SMS client initialised")
-        except ImportError:
-            logger.warning("twilio package not installed – SMS notifications disabled. "
-                           "Install with: pip install twilio")
-            self._enabled = False
-        except Exception as e:
-            logger.error(f"Twilio init error: {e}")
-            self._enabled = False
-
-    # ── Core send ───────────────────────────────────────────────────
-
-    def _send_sms(self, body: str) -> bool:
-        """Send an SMS message. Returns True on success."""
-        if not self._enabled or not self._client:
-            return False
-        if not self._phone or not self._from:
-            logger.warning("Phone numbers not configured for SMS")
-            return False
-        try:
-            message = self._client.messages.create(
-                body=body,
-                from_=self._from,
-                to=self._phone
-            )
-            logger.info(f"SMS sent (SID {message.sid}): {body[:60]}...")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to send SMS: {e}")
-            return False
-
-    # ── Public helpers ──────────────────────────────────────────────
+        self._openclaw_enabled = self.config.OPENCLAW_ENABLED
+        self._openclaw_target = self.config.OPENCLAW_WHATSAPP_TARGET
+        self._last_error = ""
 
     def is_enabled(self) -> bool:
-        return self._enabled and self._client is not None
+        return self._openclaw_enabled
 
     def enable(self, enabled: bool = True):
-        """Toggle notifications on/off at runtime."""
-        if enabled and not self._client:
-            self._init_twilio()
-        self._enabled = enabled
+        """Compatibility alias for toggling notifications at runtime."""
+        self.enable_openclaw(enabled)
 
-    def set_phone_number(self, phone: str):
-        """Update the destination phone number at runtime."""
-        self._phone = phone
-        logger.info(f"Notification phone updated to {phone}")
+    def is_openclaw_enabled(self) -> bool:
+        return self._openclaw_enabled
 
-    def get_phone_number(self) -> str:
-        return self._phone or ''
+    def enable_openclaw(self, enabled: bool = True):
+        """Toggle OpenClaw WhatsApp delivery at runtime."""
+        self._openclaw_enabled = bool(enabled)
 
-    # ── High-level notification methods ─────────────────────────────
+    def set_openclaw_target(self, target: str):
+        """Update the OpenClaw WhatsApp destination at runtime."""
+        self._openclaw_target = target
+        logger.info("OpenClaw WhatsApp target updated")
 
-    def notify_trade_opened(self, symbol: str, side: str, quantity: int,
-                            price: float, horizon: str = 'WEEK'):
+    def get_openclaw_target(self) -> str:
+        return self._openclaw_target or ""
+
+    def get_last_error(self) -> str:
+        return self._last_error
+
+    def _set_last_error(self, message: str) -> bool:
+        self._last_error = message
+        logger.error(message)
+        return False
+
+    def _resolve_openclaw_cli(self) -> str:
+        configured = self.config.OPENCLAW_CLI or "openclaw"
+        resolved = shutil.which(configured)
+        if resolved:
+            return resolved
+
+        if os.name == "nt":
+            if not configured.lower().endswith((".cmd", ".exe", ".bat")):
+                resolved = shutil.which(f"{configured}.cmd")
+                if resolved:
+                    return resolved
+
+            appdata = os.environ.get("APPDATA")
+            if appdata:
+                npm_shim = Path(appdata) / "npm" / "openclaw.cmd"
+                if npm_shim.exists():
+                    return str(npm_shim)
+
+        return configured
+
+    def send_openclaw_whatsapp(self, body: str, target: Optional[str] = None) -> bool:
+        """Send a WhatsApp message through OpenClaw's CLI gateway."""
+        self._last_error = ""
+        if not self._openclaw_enabled:
+            return self._set_last_error("OpenClaw WhatsApp delivery disabled")
+
+        destination = target or self._openclaw_target
+        if not destination:
+            return self._set_last_error("OpenClaw WhatsApp target is not configured")
+
+        openclaw_cli = self._resolve_openclaw_cli()
+
+        cmd = [
+            openclaw_cli,
+            "message",
+            "send",
+            "--channel",
+            self.config.OPENCLAW_CHANNEL,
+            "--target",
+            destination,
+            "--message",
+            body,
+            "--json",
+        ]
+        if self.config.OPENCLAW_ACCOUNT:
+            cmd[5:5] = ["--account", self.config.OPENCLAW_ACCOUNT]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.config.OPENCLAW_TIMEOUT_SECONDS,
+                check=False,
+            )
+            if result.returncode == 0:
+                logger.info("OpenClaw WhatsApp sent")
+                return True
+            return self._set_last_error(
+                "OpenClaw WhatsApp failed "
+                f"({result.returncode}): {(result.stderr or result.stdout or '').strip()}"
+            )
+        except FileNotFoundError:
+            return self._set_last_error(f"OpenClaw CLI not found: {openclaw_cli}")
+        except subprocess.TimeoutExpired:
+            return self._set_last_error("OpenClaw WhatsApp send timed out")
+        except Exception as e:
+            return self._set_last_error(f"OpenClaw WhatsApp send error: {e}")
+
+    def send_openclaw_test(self, target: Optional[str] = None) -> bool:
+        """Send a test WhatsApp message through OpenClaw."""
+        return self.send_openclaw_whatsapp(
+            "Trading Agent test notification via OpenClaw WhatsApp.",
+            target=target,
+        )
+
+    def notify_trade_opened(
+        self,
+        symbol: str,
+        side: str,
+        quantity: int,
+        price: float,
+        horizon: str = "WEEK",
+    ):
         body = (
-            f"📈 TRADE OPENED\n"
+            "TRADE OPENED\n"
             f"{side.upper()} {quantity} x {symbol} @ ${price:.2f}\n"
             f"Horizon: {horizon}\n"
             f"Time: {datetime.now().strftime('%H:%M:%S')}"
         )
-        self._send_sms(body)
+        self.send_openclaw_whatsapp(body)
 
-    def notify_trade_closed(self, symbol: str, quantity: int,
-                            exit_price: float, pnl: float, reason: str):
-        emoji = "✅" if pnl >= 0 else "❌"
+    def notify_trade_closed(
+        self,
+        symbol: str,
+        quantity: int,
+        exit_price: float,
+        pnl: float,
+        reason: str,
+    ):
+        outcome = "PROFIT" if pnl >= 0 else "LOSS"
         body = (
-            f"{emoji} TRADE CLOSED\n"
+            f"TRADE CLOSED - {outcome}\n"
             f"{symbol} x{quantity} @ ${exit_price:.2f}\n"
             f"P&L: ${pnl:+.2f}\n"
             f"Reason: {reason}\n"
             f"Time: {datetime.now().strftime('%H:%M:%S')}"
         )
-        self._send_sms(body)
+        self.send_openclaw_whatsapp(body)
 
-    def notify_signal(self, symbol: str, action: str, confidence: float,
-                      price: float, horizon: str = 'WEEK'):
+    def notify_signal(
+        self,
+        symbol: str,
+        action: str,
+        confidence: float,
+        price: float,
+        horizon: str = "WEEK",
+    ):
         body = (
-            f"🔔 SIGNAL: {action} {symbol}\n"
+            f"SIGNAL: {action} {symbol}\n"
             f"Confidence: {confidence:.1f}%\n"
             f"Price: ${price:.2f}\n"
             f"Horizon: {horizon}\n"
             f"Time: {datetime.now().strftime('%H:%M:%S')}"
         )
-        self._send_sms(body)
+        self.send_openclaw_whatsapp(body)
 
     def notify_risk_alert(self, message: str):
-        body = f"⚠️ RISK ALERT\n{message}\nTime: {datetime.now().strftime('%H:%M:%S')}"
-        self._send_sms(body)
+        body = f"RISK ALERT\n{message}\nTime: {datetime.now().strftime('%H:%M:%S')}"
+        self.send_openclaw_whatsapp(body)
 
     def notify_stop_loss(self, symbol: str, price: float, pnl: float):
         body = (
-            f"🛑 STOP LOSS HIT\n"
+            "STOP LOSS HIT\n"
             f"{symbol} @ ${price:.2f}\n"
             f"P&L: ${pnl:+.2f}\n"
             f"Time: {datetime.now().strftime('%H:%M:%S')}"
         )
-        self._send_sms(body)
+        self.send_openclaw_whatsapp(body)
 
     def notify_take_profit(self, symbol: str, price: float, pnl: float):
         body = (
-            f"🎯 TAKE PROFIT HIT\n"
+            "TAKE PROFIT HIT\n"
             f"{symbol} @ ${price:.2f}\n"
             f"P&L: ${pnl:+.2f}\n"
             f"Time: {datetime.now().strftime('%H:%M:%S')}"
         )
-        self._send_sms(body)
-
-    def send_test(self) -> bool:
-        """Send a test SMS to verify configuration."""
-        return self._send_sms(
-            "🤖 Trading Agent test notification – SMS is working!"
-        )
+        self.send_openclaw_whatsapp(body)

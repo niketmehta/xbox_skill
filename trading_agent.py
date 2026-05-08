@@ -6,11 +6,10 @@ No day-trading logic — positions are held overnight.
 import logging
 import time
 import schedule
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional
-import threading
 from concurrent.futures import ThreadPoolExecutor
-import json
+from logging.handlers import RotatingFileHandler
 
 from config import Config
 from data_provider import MarketDataProvider
@@ -18,13 +17,15 @@ from trading_strategy import TradingStrategy
 from portfolio_manager import PortfolioManager
 from stock_screener import StockScreener
 from notifications import NotificationService
+from recommendation_engine import TopRecommendationEngine, format_top_recommendations_message
+from trade_simulator import TradeSimulationEngine
 
 
 class TradingAgent:
     """
     Main trading agent that orchestrates multi-timeframe market analysis
     (WEEK and MONTH horizons), strategy execution, risk management,
-    and SMS notifications.
+    and WhatsApp notifications.
     """
 
     def __init__(self):
@@ -37,6 +38,14 @@ class TradingAgent:
         self.notifications = NotificationService()
         self.portfolio_manager = PortfolioManager(self.data_provider, notifications=self.notifications)
         self.stock_screener = StockScreener(self.data_provider)
+        self.recommendation_engine = TopRecommendationEngine(
+            self.trading_strategy,
+            portfolio_manager=self.portfolio_manager
+        )
+        self.trade_simulator = TradeSimulationEngine(
+            data_provider=self.data_provider,
+            notifications=self.notifications,
+        )
 
         # Agent state
         self.is_running = False
@@ -57,7 +66,12 @@ class TradingAgent:
             level=logging.INFO,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler('trading_agent.log'),
+                RotatingFileHandler(
+                    'trading_agent.log',
+                    maxBytes=1_000_000,
+                    backupCount=3,
+                    encoding='utf-8',
+                ),
                 logging.StreamHandler()
             ]
         )
@@ -82,6 +96,20 @@ class TradingAgent:
         schedule.every().day.at("06:00").do(self._daily_startup)
         schedule.every().day.at("16:30").do(self._daily_review)
         schedule.every().hour.do(self._hourly_portfolio_snapshot)
+        if self.config.TOP_RECOMMENDATIONS_ENABLED:
+            schedule.every().day.at(self.config.TOP_RECOMMENDATIONS_TIME).do(
+                self._send_scheduled_top_recommendations
+            )
+        if self.config.SIMULATION_ENABLED:
+            schedule.every().day.at(self.config.SIMULATION_OPEN_TIME).do(
+                self._capture_scheduled_open_simulation
+            )
+            schedule.every().day.at(self.config.SIMULATION_MIDDAY_TIME).do(
+                self._send_scheduled_midday_simulation_summary
+            )
+            schedule.every().day.at(self.config.SIMULATION_EOD_TIME).do(
+                self._send_scheduled_simulation_summary
+            )
 
         try:
             while self.is_running:
@@ -268,6 +296,48 @@ class TradingAgent:
         if self.is_market_hours:
             self.portfolio_manager.save_portfolio_snapshot()
 
+    def _send_scheduled_top_recommendations(self):
+        horizon = self.config.TOP_RECOMMENDATIONS_HORIZON
+        self.logger.info("Sending scheduled trading council digest [%s]", horizon)
+        result = self.send_top_recommendations_whatsapp(
+            horizon=horizon,
+            limit=5,
+            universe_size=50,
+        )
+        if not result.get('delivery', {}).get('sent'):
+            self.logger.warning("Scheduled trading council digest was not delivered")
+
+    def _capture_scheduled_open_simulation(self):
+        self.logger.info("Capturing simulated open entries for top recommendations")
+        result = self.trade_simulator.capture_open_trades(
+            top_n=self.config.SIMULATION_TOP_N
+        )
+        self.logger.info(
+            "Simulated open capture: %s/%s trades",
+            result.get("captured", 0),
+            result.get("requested", 0),
+        )
+        if result.get("errors"):
+            self.logger.warning("Open simulation errors: %s", result.get("errors"))
+
+    def _send_scheduled_simulation_summary(self):
+        self.logger.info("Sending simulated end-of-day P&L summary")
+        result = self.trade_simulator.send_eod_summary_whatsapp(label="EOD")
+        if not result.get("delivery", {}).get("sent"):
+            self.logger.warning(
+                "Simulated end-of-day P&L summary was not delivered: %s",
+                result.get("delivery", {}).get("error"),
+            )
+
+    def _send_scheduled_midday_simulation_summary(self):
+        self.logger.info("Sending simulated midday P&L summary")
+        result = self.trade_simulator.send_eod_summary_whatsapp(label="MIDDAY")
+        if not result.get("delivery", {}).get("sent"):
+            self.logger.warning(
+                "Simulated midday P&L summary was not delivered: %s",
+                result.get("delivery", {}).get("error"),
+            )
+
     # ── Status & analysis ───────────────────────────────────────────
 
     def get_status(self) -> Dict:
@@ -390,6 +460,43 @@ class TradingAgent:
         except Exception as e:
             self.logger.error(f"Error in manual stock screening: {e}")
             return []
+
+    def get_top_recommendations(
+        self,
+        horizon: str = 'WEEK',
+        limit: int = 5,
+        universe_size: int = 50,
+    ) -> Dict:
+        """Run the multi-agent council and return challenged top BUY candidates."""
+        return self.recommendation_engine.get_top_recommendations(
+            symbols=self.watchlist,
+            horizon=horizon,
+            limit=limit,
+            universe_size=universe_size,
+        )
+
+    def send_top_recommendations_whatsapp(
+        self,
+        horizon: str = 'WEEK',
+        limit: int = 5,
+        universe_size: int = 50,
+        target: Optional[str] = None,
+    ) -> Dict:
+        """Generate top recommendations and deliver the digest via OpenClaw WhatsApp."""
+        result = self.get_top_recommendations(
+            horizon=horizon,
+            limit=limit,
+            universe_size=universe_size,
+        )
+        body = format_top_recommendations_message(result)
+        sent = self.notifications.send_openclaw_whatsapp(body, target=target)
+        result['delivery'] = {
+            'channel': 'openclaw_whatsapp',
+            'sent': sent,
+            'target': target or self.notifications.get_openclaw_target(),
+            'message': body,
+        }
+        return result
 
 
 def main():

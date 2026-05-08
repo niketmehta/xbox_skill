@@ -5,22 +5,21 @@ An automated day trading system that analyzes real-time market data, recommends 
 ## 🌟 Features
 
 ### Core Trading Capabilities
-- **Real-time Market Data**: Integration with Yahoo Finance and Alpha Vantage APIs
-- **Automatic Stock Picking**: AI-powered stock screening based on day trading criteria
+- **Market Data**: Alpaca-first market data, with optional Yahoo/Stooq fallback configuration
+- **Automatic Stock Picking**: Multi-agent council for Top N recommendations
 - **Multi-Strategy Analysis**: Momentum, mean reversion, breakout, and volume-based strategies
-- **Extended Hours Monitoring**: Pre-market and after-hours analysis for gap opportunities
 - **Automatic Risk Management**: Stop-loss and take-profit mechanisms
-- **End-of-Day Liquidation**: Automatic position closing before market close
+- **WhatsApp Digests**: OpenClaw messages for picks, simulated open entries, and EOD P/L
 - **Portfolio Management**: Position tracking, P&L calculation, and performance metrics
 
 ### Web Dashboard
 - **Real-time Monitoring**: Live portfolio and position updates
-- **Automatic Stock Screening**: Multiple screening criteria (day trading, momentum, breakout, high volume)
+- **Automatic Stock Screening**: Multiple screening criteria (swing, momentum, breakout, high volume)
 - **Smart Watchlist**: Auto-generated and periodically updated watchlists
 - **Market Analysis**: Interactive stock analysis with technical indicators
 - **Risk Metrics**: Portfolio drawdown, win rate, and profit factor tracking
 - **Watchlist Management**: Both automatic and manual stock selection
-- **Manual Controls**: Start/stop agent, force liquidation, and configuration
+- **Manual Controls**: Start/stop agent, send digests, force liquidation, and configuration
 
 ### Risk Controls
 - **Position Sizing**: Automatic position sizing based on risk tolerance
@@ -87,7 +86,25 @@ STOP_LOSS_PERCENTAGE=0.02      # 2% stop loss
 TAKE_PROFIT_PERCENTAGE=0.05    # 5% take profit
 MAX_DAILY_LOSS=500            # Maximum daily loss
 MAX_POSITIONS=5               # Maximum concurrent positions
+
+# Optional: OpenClaw WhatsApp delivery
+OPENCLAW_ENABLED=false
+OPENCLAW_CLI=openclaw
+OPENCLAW_CHANNEL=whatsapp
+OPENCLAW_ACCOUNT=
+OPENCLAW_WHATSAPP_TARGET=+1234567890
+OPENCLAW_TIMEOUT_SECONDS=45
+
+# Optional scheduled WhatsApp digest
+TOP_RECOMMENDATIONS_ENABLED=false
+TOP_RECOMMENDATIONS_TIME=06:15
+TOP_RECOMMENDATIONS_HORIZON=WEEK
 ```
+
+### OpenClaw Trading Council
+- `GET /api/recommendations/top5?horizon=WEEK&limit=5` runs the multi-agent council and returns challenged BUY candidates with buy zone, exit target, stop loss, risk/reward, objections, and a WhatsApp-ready digest.
+- `POST /api/recommendations/top5/send-whatsapp` regenerates the council digest and sends it through OpenClaw WhatsApp when `OPENCLAW_ENABLED=true`.
+- The council uses momentum, breakout, mean-reversion, volume, fundamentals, relative strength, macro risk, skeptic, and arbiter agents. Picks are saved to `trading_data.db` for audit.
 
 ### Trading Hours
 - **Market Hours**: 9:30 AM - 4:00 PM ET
@@ -222,8 +239,8 @@ All trades and portfolio snapshots are stored in SQLite database (`trading_data.
 ## 🛠️ Troubleshooting
 
 ### Common Issues
-1. **API Rate Limits**: Reduce scan frequency if hitting limits
-2. **Market Data Delays**: Yahoo Finance data may have delays
+1. **API Rate Limits**: Reduce scan frequency or use Alpaca-first data if hitting limits
+2. **Market Data Delays**: Alpaca IEX and other free feeds may be delayed or partial
 3. **WebSocket Connections**: Restart agent if connection issues
 4. **Database Locks**: Ensure only one agent instance running
 

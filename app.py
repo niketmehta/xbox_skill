@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request, redirect, url_for
+from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 import json
 import math
@@ -70,6 +70,8 @@ def convert_numpy_types(obj):
 _rec_cache = {}          # {horizon: {'data': [...], 'ts': float}}
 _REC_CACHE_TTL = 60      # seconds – serve cached data if < 60 s old
 _REC_MAX_SYMBOLS = 25    # analyse at most this many symbols per request
+_top5_cache = {}         # {(horizon, limit, universe): {'data': {...}, 'ts': float}}
+_TOP5_CACHE_TTL = 300    # seconds
 
 # ── Dashboard ───────────────────────────────────────────────────
 
@@ -422,6 +424,110 @@ def get_watchlist_recommendations():
 
 # ── Analysis ────────────────────────────────────────────────────
 
+@app.route('/api/recommendations/top5')
+def get_top_recommendations():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        horizon = request.args.get('horizon', 'WEEK').upper()
+        if horizon not in ('WEEK', 'MONTH'):
+            horizon = 'WEEK'
+        limit = max(1, min(request.args.get('limit', 5, type=int), 10))
+        universe_size = max(limit, min(request.args.get('universe_size', 50, type=int), 120))
+        refresh = request.args.get('refresh', 'false').lower() == 'true'
+        cache_key = (horizon, limit, universe_size)
+
+        cached = _top5_cache.get(cache_key)
+        if not refresh and cached and (_time.time() - cached['ts']) < _TOP5_CACHE_TTL:
+            data = dict(cached['data'])
+            data['cached'] = True
+            return jsonify(convert_numpy_types(data))
+
+        result = trading_agent.get_top_recommendations(
+            horizon=horizon,
+            limit=limit,
+            universe_size=universe_size,
+        )
+        result = convert_numpy_types(result)
+        _top5_cache[cache_key] = {'data': result, 'ts': _time.time()}
+        return jsonify(result)
+    except Exception as e:
+        app.logger.error(f"Error getting top recommendations: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/recommendations/top5/send-whatsapp', methods=['POST'])
+def send_top_recommendations_whatsapp():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        data = request.get_json() or {}
+        horizon = (data.get('horizon') or 'WEEK').upper()
+        if horizon not in ('WEEK', 'MONTH'):
+            horizon = 'WEEK'
+        limit = max(1, min(int(data.get('limit') or 5), 10))
+        universe_size = max(limit, min(int(data.get('universe_size') or 50), 120))
+        target = data.get('target') or None
+
+        result = trading_agent.send_top_recommendations_whatsapp(
+            horizon=horizon,
+            limit=limit,
+            universe_size=universe_size,
+            target=target,
+        )
+        result = convert_numpy_types(result)
+        if result.get('delivery', {}).get('sent'):
+            return jsonify(result)
+        detail = trading_agent.notifications.get_last_error()
+        return jsonify({
+            'error': 'Failed to send OpenClaw WhatsApp message. Check OpenClaw config.',
+            'detail': detail,
+            **result
+        }), 400
+    except Exception as e:
+        app.logger.error(f"Error sending top recommendations: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/recommendations/simulation/open', methods=['POST'])
+def capture_recommendation_simulation_open():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        data = request.get_json() or {}
+        top_n = data.get('top_n') or None
+        result = trading_agent.trade_simulator.capture_open_trades(top_n=top_n)
+        return jsonify(convert_numpy_types(result))
+    except Exception as e:
+        app.logger.error(f"Error capturing simulated open trades: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/recommendations/simulation/eod')
+def get_recommendation_simulation_eod():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        result = trading_agent.trade_simulator.build_eod_summary()
+        return jsonify(convert_numpy_types(result))
+    except Exception as e:
+        app.logger.error(f"Error getting simulated EOD summary: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/recommendations/simulation/eod/send-whatsapp', methods=['POST'])
+def send_recommendation_simulation_eod_whatsapp():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        result = trading_agent.trade_simulator.send_eod_summary_whatsapp()
+        result = convert_numpy_types(result)
+        if result.get('delivery', {}).get('sent'):
+            return jsonify(result)
+        return jsonify({
+            'error': 'Failed to send simulated EOD WhatsApp summary.',
+            **result
+        }), 400
+    except Exception as e:
+        app.logger.error(f"Error sending simulated EOD summary: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/analyze/<symbol>')
 def analyze_symbol(symbol):
     if not trading_agent:
@@ -538,10 +644,23 @@ def screen_stocks():
         screen_type = request.args.get('type', 'swing')
         max_stocks = request.args.get('max_stocks', 25, type=int)
         screened_stocks = trading_agent.screen_stocks_manual(screen_type, max_stocks)
+
+        added = []
+        for sym in screened_stocks:
+            if sym not in trading_agent.watchlist:
+                trading_agent.watchlist.append(sym)
+                added.append(sym)
+        if added:
+            trading_agent.watchlist = trading_agent.watchlist[:80]
+            app.logger.info(f"Screen added {len(added)} new symbols to watchlist")
+
+        _rec_cache.clear()
+
         return jsonify({
             'screen_type': screen_type,
             'stocks': screened_stocks,
-            'count': len(screened_stocks)
+            'count': len(screened_stocks),
+            'added_to_watchlist': len(added)
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -580,7 +699,8 @@ def get_notification_config():
         ns = trading_agent.notifications
         return jsonify({
             'enabled': ns.is_enabled(),
-            'phone_number': ns.get_phone_number()
+            'openclaw_enabled': ns.is_openclaw_enabled(),
+            'openclaw_target': ns.get_openclaw_target()
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -595,31 +715,38 @@ def update_notification_config():
         
         if 'enabled' in data:
             ns.enable(data['enabled'])
-        if 'phone_number' in data:
-            ns.set_phone_number(data['phone_number'])
+        if 'openclaw_enabled' in data:
+            ns.enable_openclaw(data['openclaw_enabled'])
+        if 'openclaw_target' in data:
+            ns.set_openclaw_target(data['openclaw_target'])
         
         return jsonify({
             'message': 'Notification settings updated',
             'enabled': ns.is_enabled(),
-            'phone_number': ns.get_phone_number()
+            'openclaw_enabled': ns.is_openclaw_enabled(),
+            'openclaw_target': ns.get_openclaw_target()
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/notifications/test', methods=['POST'])
-def test_notification():
+# ── Error handlers ──────────────────────────────────────────────
+
+@app.route('/api/notifications/test-whatsapp', methods=['POST'])
+def test_openclaw_whatsapp():
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
     try:
-        success = trading_agent.notifications.send_test()
+        data = request.get_json() or {}
+        target = data.get('target') or None
+        success = trading_agent.notifications.send_openclaw_test(target=target)
         if success:
-            return jsonify({'message': 'Test SMS sent successfully'})
-        else:
-            return jsonify({'error': 'Failed to send test SMS. Check Twilio configuration.'}), 400
+            return jsonify({'message': 'Test OpenClaw WhatsApp sent successfully'})
+        return jsonify({
+            'error': 'Failed to send OpenClaw WhatsApp. Check OpenClaw configuration.',
+            'detail': trading_agent.notifications.get_last_error()
+        }), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-# ── Error handlers ──────────────────────────────────────────────
 
 @app.errorhandler(404)
 def not_found(error):

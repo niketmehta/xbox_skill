@@ -1,10 +1,7 @@
-import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 import logging
-import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from data_provider import MarketDataProvider
 from config import Config
@@ -72,7 +69,7 @@ class StockScreener:
         
         screened_stocks = []
         
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             future_to_symbol = {
                 executor.submit(self._evaluate_swing_stock, symbol): symbol 
                 for symbol in candidate_symbols[:100]
@@ -100,11 +97,7 @@ class StockScreener:
         """Evaluate if a stock has high volatility suitable for aggressive trading"""
         
         try:
-            # Get recent data
-            ticker = yf.Ticker(symbol)
-            
-            # Get more data for volatility calculation
-            data = ticker.history(period="30d", interval="1d")
+            data = self.data_provider.get_daily_data(symbol, period="30d")
             
             if len(data) < 20:
                 return None
@@ -144,8 +137,7 @@ class StockScreener:
         """Evaluate if a stock is suitable for swing/position trading."""
         
         try:
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period="60d", interval="1d")
+            data = self.data_provider.get_daily_data(symbol, period="60d")
             if data.empty or len(data) < 20:
                 return None
             
@@ -274,7 +266,7 @@ class StockScreener:
         candidate_symbols = self.stock_universes['sp500'][:200]
         breakout_stocks = []
         
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             future_to_symbol = {
                 executor.submit(self._check_breakout_pattern, symbol): symbol 
                 for symbol in candidate_symbols
@@ -301,8 +293,7 @@ class StockScreener:
         """Check for breakout patterns"""
         
         try:
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period="60d", interval="1d")
+            data = self.data_provider.get_daily_data(symbol, period="60d")
             
             if len(data) < 30:
                 return None
@@ -375,7 +366,7 @@ class StockScreener:
             
             high_volatility_stocks = []
             
-            with ThreadPoolExecutor(max_workers=8) as executor:
+            with ThreadPoolExecutor(max_workers=4) as executor:
                 future_to_symbol = {
                     executor.submit(self._evaluate_volatility_stock, symbol): symbol 
                     for symbol in candidate_symbols[:80]
@@ -511,7 +502,7 @@ class StockScreener:
         
         value_stocks = []
         
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             future_to_symbol = {
                 executor.submit(self._evaluate_value_stock, symbol): symbol
                 for symbol in candidate_symbols[:80]
@@ -537,12 +528,11 @@ class StockScreener:
     def _evaluate_value_stock(self, symbol: str) -> Optional[Dict]:
         """Evaluate a stock for value characteristics."""
         try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.info
-            pe = info.get('trailingPE') or info.get('forwardPE')
-            pb = info.get('priceToBook')
-            div_yield = info.get('dividendYield', 0) or 0
-            profit_margin = info.get('profitMargins', 0) or 0
+            info = self.data_provider.get_stock_fundamentals(symbol)
+            pe = info.get('pe_ratio') or info.get('forward_pe')
+            pb = info.get('price_to_book')
+            div_yield = info.get('dividend_yield', 0) or 0
+            profit_margin = info.get('profit_margin', 0) or 0
             
             if pe is None or pe <= 0:
                 return None

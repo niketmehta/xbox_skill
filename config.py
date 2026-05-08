@@ -9,13 +9,30 @@ class Config:
     ALPACA_API_KEY = os.getenv('ALPACA_API_KEY', '')
     ALPACA_SECRET_KEY = os.getenv('ALPACA_SECRET_KEY', '')
     ALPACA_BASE_URL = os.getenv('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
+    ALPACA_DATA_FEED = os.getenv('ALPACA_DATA_FEED', 'iex')
+    STOOQ_API_KEY = os.getenv('STOOQ_API_KEY', '')
     
-    # Twilio SMS Notifications
-    TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID', '')
-    TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN', '')
-    TWILIO_FROM_NUMBER = os.getenv('TWILIO_FROM_NUMBER', '')
-    NOTIFICATION_PHONE_NUMBER = os.getenv('NOTIFICATION_PHONE_NUMBER', '')
-    NOTIFICATIONS_ENABLED = os.getenv('NOTIFICATIONS_ENABLED', 'false').lower() == 'true'
+    # OpenClaw WhatsApp delivery
+    OPENCLAW_ENABLED = os.getenv('OPENCLAW_ENABLED', 'false').lower() == 'true'
+    OPENCLAW_CLI = os.getenv('OPENCLAW_CLI', 'openclaw')
+    OPENCLAW_CHANNEL = os.getenv('OPENCLAW_CHANNEL', 'whatsapp')
+    OPENCLAW_ACCOUNT = os.getenv('OPENCLAW_ACCOUNT', '')
+    OPENCLAW_WHATSAPP_TARGET = os.getenv('OPENCLAW_WHATSAPP_TARGET', '')
+    OPENCLAW_TIMEOUT_SECONDS = int(os.getenv('OPENCLAW_TIMEOUT_SECONDS', 45))
+
+    # Scheduled council digest
+    TOP_RECOMMENDATIONS_ENABLED = os.getenv('TOP_RECOMMENDATIONS_ENABLED', 'false').lower() == 'true'
+    TOP_RECOMMENDATIONS_TIME = os.getenv('TOP_RECOMMENDATIONS_TIME', '06:15')
+    TOP_RECOMMENDATIONS_HORIZON = os.getenv('TOP_RECOMMENDATIONS_HORIZON', 'WEEK')
+
+    # Simulated open-entry / end-of-day P&L summary
+    SIMULATION_ENABLED = os.getenv('SIMULATION_ENABLED', 'true').lower() == 'true'
+    SIMULATION_TOP_N = int(os.getenv('SIMULATION_TOP_N', 5))
+    SIMULATION_NOTIONAL_PER_PICK = float(os.getenv('SIMULATION_NOTIONAL_PER_PICK', 1000))
+    SIMULATION_OPEN_TIME = os.getenv('SIMULATION_OPEN_TIME', '06:35')
+    SIMULATION_MIDDAY_TIME = os.getenv('SIMULATION_MIDDAY_TIME', '09:00')
+    SIMULATION_EOD_TIME = os.getenv('SIMULATION_EOD_TIME', '13:10')
+    SIMULATION_OPEN_WHATSAPP_ENABLED = os.getenv('SIMULATION_OPEN_WHATSAPP_ENABLED', 'true').lower() == 'true'
     
     # Trading Parameters
     MAX_PORTFOLIO_VALUE = float(os.getenv('MAX_PORTFOLIO_VALUE', 10000))
@@ -65,6 +82,10 @@ class Config:
     # Data Sources
     USE_YAHOO_FINANCE = True
     USE_ALPHA_VANTAGE = True
+    USE_ALPACA_MARKET_DATA = os.getenv('USE_ALPACA_MARKET_DATA', 'true').lower() == 'true'
+    MARKET_DATA_PRIMARY = os.getenv('MARKET_DATA_PRIMARY', 'yahoo').lower()
+    USE_STOOQ_FALLBACK = os.getenv('USE_STOOQ_FALLBACK', 'true').lower() == 'true'
+    YAHOO_COOLDOWN_SECONDS = int(os.getenv('YAHOO_COOLDOWN_SECONDS', 900))
     
     # Strategy Parameters
     RSI_OVERSOLD = 30

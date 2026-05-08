@@ -227,7 +227,7 @@
             <h1 class="title">Trading Agent</h1>
             <span class="mode-badge">Swing + Position</span>
         </div>
-        <p class="subtitle">6-signal analysis &middot; ATR-based risk management &middot; VIX regime filtering &middot; SMS alerts</p>
+        <p class="subtitle">6-signal analysis &middot; ATR-based risk management &middot; VIX regime filtering &middot; WhatsApp alerts</p>
         <div class="controls">
             <button class="btn btn-start" onclick="startAgent()">&#9654; Start Agent</button>
             <button class="btn btn-stop" onclick="stopAgent()">&#9632; Stop Agent</button>
@@ -309,6 +309,18 @@
                 <option value="high_volume">High Volume</option>
                     </select>
             <button class="btn" style="background:#8b5cf6;padding:5px 10px;font-size:.9em;" onclick="screenStocks()">Screen Now</button>
+
+            <span style="margin-left:auto;"></span>
+            <label style="font-weight:600;color:#a5b4fc;">Sort:</label>
+            <select id="sort-select" onchange="renderWatchlistTable()">
+                <option value="signal">Signal (BUY first)</option>
+                <option value="confidence-desc" selected>Confidence (high-low)</option>
+                <option value="confidence-asc">Confidence (low-high)</option>
+                <option value="price-desc">Price (high-low)</option>
+                <option value="price-asc">Price (low-high)</option>
+                <option value="position-desc">Position Size (high-low)</option>
+                <option value="symbol-asc">Symbol (A-Z)</option>
+            </select>
             <span id="auto-status" style="font-size:.85em;color:#6b7280;"></span>
             </div>
             
@@ -321,6 +333,24 @@
         <div id="watchlist-table"><div class="loading">Loading watchlist...</div></div>
         </div>
 
+    <!-- Trading Council Top Picks -->
+    <div class="table-container" style="margin-top:20px;">
+        <div class="card-header">
+            <span class="card-header-icon">&#9878;</span> Trading Council Top 5
+            <button class="refresh-btn" onclick="refreshTopRecommendations(true)">&#8635; Run Council</button>
+        </div>
+        <div style="background:rgba(40,40,80,.5);padding:14px;border-radius:8px;margin:10px 0;display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
+            <label style="font-weight:600;color:#a5b4fc;">Horizon:</label>
+            <select id="top-horizon-select">
+                <option value="WEEK" selected>1 Week</option>
+                <option value="MONTH">1 Month</option>
+            </select>
+            <button class="btn" style="background:#22c55e;padding:6px 14px;font-size:.9em;" onclick="sendTopRecommendations()">Send WhatsApp</button>
+            <span id="top-rec-status" style="font-size:.85em;color:#6b7280;"></span>
+        </div>
+        <div id="top-recommendations"><div class="loading">Run the council to generate challenged top picks</div></div>
+    </div>
+
         <!-- Market Movers -->
     <div class="table-container" style="margin-top:20px;">
         <div class="card-header">
@@ -332,18 +362,18 @@
 
     <!-- Notification Settings -->
     <div class="table-container" style="margin-top:20px;">
-        <div class="card-header"><span class="card-header-icon">&#128241;</span> SMS Notifications</div>
+        <div class="card-header"><span class="card-header-icon">&#128241;</span> WhatsApp Notifications</div>
         <div class="notif-panel">
             <div class="notif-row">
-                <label style="display:flex;align-items:center;gap:5px;">
-                    <input type="checkbox" id="notif-enabled">
-                    <span>Enable SMS alerts</span>
-                </label>
+                <input type="text" class="notif-input" id="openclaw-target" placeholder="WhatsApp target (e.g. +1234567890)">
+                <button class="btn" style="background:#6366f1;padding:6px 14px;font-size:.9em;" onclick="saveNotifConfig()">Save</button>
+                <button class="btn" style="background:#22c55e;padding:6px 14px;font-size:.9em;" onclick="testOpenClawWhatsApp()">Test WhatsApp</button>
             </div>
             <div class="notif-row">
-                <input type="text" class="notif-input" id="notif-phone" placeholder="Phone number (e.g. +1234567890)">
-                <button class="btn" style="background:#6366f1;padding:6px 14px;font-size:.9em;" onclick="saveNotifConfig()">Save</button>
-                <button class="btn" style="background:#8b5cf6;padding:6px 14px;font-size:.9em;" onclick="testNotification()">Test SMS</button>
+                <label style="display:flex;align-items:center;gap:5px;">
+                    <input type="checkbox" id="openclaw-enabled">
+                    <span>Enable OpenClaw WhatsApp</span>
+                </label>
             </div>
             <div id="notif-status" style="font-size:.85em;color:#6b7280;margin-top:6px;"></div>
         </div>
@@ -373,7 +403,7 @@
 });
 
 // Light refresh every 30s (status, portfolio, positions — cheap local data)
-// Heavy refresh every 120s (market movers, watchlist recommendations — hits Yahoo)
+// Heavy refresh every 120s (market movers, watchlist recommendations)
 function startAutoRefresh() {
     refreshInterval = setInterval(refreshLight, 30000);
     heavyRefreshInterval = setInterval(refreshHeavy, 120000);
@@ -397,7 +427,7 @@ async function refreshLight() {
     } catch (e) { console.error('Light refresh error:', e); }
 }
 
-// Heavy refresh — Yahoo-hitting endpoints
+// Heavy refresh — market-data endpoints
 async function refreshHeavy() {
     try {
         await refreshWatchlist();
@@ -608,6 +638,8 @@ async function refreshPortfolio() {
 
 // ── Watchlist ──────────────────────────────────────────────
 let _watchlistLoading = false;
+let _watchlistData = [];
+let _watchlistCached = false;
 
 async function fetchWithTimeout(url, timeoutMs = 45000) {
     const controller = new AbortController();
@@ -622,11 +654,96 @@ async function fetchWithTimeout(url, timeoutMs = 45000) {
     }
 }
 
+function sortWatchlistData(recs) {
+    const sortKey = document.getElementById('sort-select').value;
+    const signalOrder = { 'BUY': 0, 'SELL': 1, 'HOLD': 2, 'ERROR': 3 };
+    const sorted = [...recs];
+
+    sorted.sort((a, b) => {
+        switch (sortKey) {
+            case 'signal':
+                return (signalOrder[a.action] ?? 9) - (signalOrder[b.action] ?? 9)
+                    || (b.confidence || 0) - (a.confidence || 0);
+            case 'confidence-desc':
+                return (b.confidence || 0) - (a.confidence || 0);
+            case 'confidence-asc':
+                return (a.confidence || 0) - (b.confidence || 0);
+            case 'price-desc':
+                return (b.current_price || 0) - (a.current_price || 0);
+            case 'price-asc':
+                return (a.current_price || 0) - (b.current_price || 0);
+            case 'position-desc':
+                return (b.position_size || 0) - (a.position_size || 0);
+            case 'symbol-asc':
+                return (a.symbol || '').localeCompare(b.symbol || '');
+            default:
+                return 0;
+        }
+    });
+    return sorted;
+}
+
+function renderWatchlistTable() {
+    const el = document.getElementById('watchlist-table');
+    if (!_watchlistData.length) {
+        el.innerHTML = '<div class="loading">No symbols in watchlist</div>';
+        return;
+    }
+
+    const sorted = sortWatchlistData(_watchlistData);
+    const h = document.getElementById('horizon-select').value;
+
+    let html = `<table><thead><tr>
+        <th style="cursor:pointer" onclick="setSortAndRender('symbol-asc')">Symbol</th>
+        <th style="cursor:pointer" onclick="toggleSort('price')">Price</th>
+        <th style="cursor:pointer" onclick="setSortAndRender('signal')">Signal</th>
+        <th style="cursor:pointer" onclick="toggleSort('confidence')">Confidence</th>
+        <th style="cursor:pointer" onclick="toggleSort('position')">Pos. Size</th>
+        <th>SL</th><th>TP</th><th>Trade</th><th>Actions</th>
+    </tr></thead><tbody>`;
+
+    sorted.forEach(rec => {
+        const aCls = rec.action ? `recommendation-${rec.action.toLowerCase()}` : 'recommendation-hold';
+        const cCls = getConfidenceClass(rec.confidence);
+        html += `<tr>
+            <td><strong>${rec.symbol}</strong></td>
+            <td>$${rec.current_price ? rec.current_price.toFixed(2) : 'N/A'}</td>
+            <td><span class="recommendation-badge ${aCls}">${rec.action || 'HOLD'}</span></td>
+            <td><span class="${cCls}">${rec.confidence ? rec.confidence.toFixed(1) : 'N/A'}%</span></td>
+            <td>$${rec.position_size ? rec.position_size.toFixed(2) : 'N/A'}</td>
+            <td>${rec.stop_loss ? '$'+rec.stop_loss.toFixed(2) : '-'}</td>
+            <td>${rec.take_profit ? '$'+rec.take_profit.toFixed(2) : '-'}</td>
+            <td style="white-space:nowrap;">
+                <button class="btn btn-start" style="padding:4px 10px;font-size:.78em;" onclick="quickBuy('${rec.symbol}','${h}')">Buy</button>
+                <button class="btn btn-stop" style="padding:4px 10px;font-size:.78em;" onclick="quickSell('${rec.symbol}')">Sell</button>
+            </td>
+            <td style="white-space:nowrap;">
+                <button class="btn" style="background:#6366f1;padding:3px 8px;font-size:.78em;" onclick="analyzeSymbol('${rec.symbol}')">Details</button>
+                <button class="btn" style="background:rgba(107,114,128,.7);padding:3px 8px;font-size:.78em;" onclick="removeFromWatchlist('${rec.symbol}')">&#10005;</button>
+            </td>
+        </tr>`;
+    });
+    html += '</tbody></table>';
+    if (_watchlistCached) html += '<div style="text-align:right;font-size:.75em;color:#6b7280;margin-top:4px;">cached &middot; refreshes every 60s</div>';
+    el.innerHTML = html;
+}
+
+function setSortAndRender(key) {
+    document.getElementById('sort-select').value = key;
+    renderWatchlistTable();
+}
+
+function toggleSort(field) {
+    const sel = document.getElementById('sort-select');
+    if (sel.value === field + '-desc') sel.value = field + '-asc';
+    else sel.value = field + '-desc';
+    renderWatchlistTable();
+}
+
 async function refreshWatchlist(retries = 1) {
-    if (_watchlistLoading) return;          // prevent overlapping calls
+    if (_watchlistLoading) return;
     _watchlistLoading = true;
     const el = document.getElementById('watchlist-table');
-    // Show spinner only if currently empty / error
     if (!el.querySelector('table')) {
         el.innerHTML = '<div class="loading">&#8987; Analysing watchlist&hellip; (this may take a few seconds)</div>';
     }
@@ -636,47 +753,19 @@ async function refreshWatchlist(retries = 1) {
         const data = await resp.json();
         if (data.error) { el.innerHTML = `<div class="error">${data.error}</div>`; _watchlistLoading = false; return; }
         if (!data.recommendations || data.recommendations.length === 0) {
+            _watchlistData = [];
             el.innerHTML = '<div class="loading">No symbols in watchlist</div>'; _watchlistLoading = false; return;
         }
 
-        let html = `<table><thead><tr>
-            <th>Symbol</th><th>Price</th><th>Signal</th><th>Confidence</th>
-            <th>Pos. Size</th><th>SL</th><th>TP</th><th>Trade</th><th>Actions</th>
-        </tr></thead><tbody>`;
-
-        data.recommendations.forEach(rec => {
-            const aCls = rec.action ? `recommendation-${rec.action.toLowerCase()}` : 'recommendation-hold';
-            const cCls = getConfidenceClass(rec.confidence);
-            const h = document.getElementById('horizon-select').value;
-            html += `<tr>
-                <td><strong>${rec.symbol}</strong></td>
-                <td>$${rec.current_price ? rec.current_price.toFixed(2) : 'N/A'}</td>
-                <td><span class="recommendation-badge ${aCls}">${rec.action || 'HOLD'}</span></td>
-                <td><span class="${cCls}">${rec.confidence ? rec.confidence.toFixed(1) : 'N/A'}%</span></td>
-                <td>$${rec.position_size ? rec.position_size.toFixed(2) : 'N/A'}</td>
-                <td>${rec.stop_loss ? '$'+rec.stop_loss.toFixed(2) : '-'}</td>
-                <td>${rec.take_profit ? '$'+rec.take_profit.toFixed(2) : '-'}</td>
-                <td style="white-space:nowrap;">
-                    <button class="btn btn-start" style="padding:4px 10px;font-size:.78em;" onclick="quickBuy('${rec.symbol}','${h}')">Buy</button>
-                    <button class="btn btn-stop" style="padding:4px 10px;font-size:.78em;" onclick="quickSell('${rec.symbol}')">Sell</button>
-                </td>
-                <td style="white-space:nowrap;">
-                    <button class="btn" style="background:#6366f1;padding:3px 8px;font-size:.78em;" onclick="analyzeSymbol('${rec.symbol}')">Details</button>
-                    <button class="btn" style="background:rgba(107,114,128,.7);padding:3px 8px;font-size:.78em;" onclick="removeFromWatchlist('${rec.symbol}')">&#10005;</button>
-                </td>
-            </tr>`;
-        });
-        html += '</tbody></table>';
-        if (data.cached) html += '<div style="text-align:right;font-size:.75em;color:#6b7280;margin-top:4px;">cached &middot; refreshes every 60s</div>';
-        el.innerHTML = html;
+        _watchlistData = data.recommendations;
+        _watchlistCached = !!data.cached;
+        renderWatchlistTable();
     } catch (e) {
         console.error('Watchlist error:', e);
         if (retries > 0) {
-            // Retry once after 3s
             setTimeout(() => { _watchlistLoading = false; refreshWatchlist(retries - 1); }, 3000);
             return;
         }
-        // Only show error if there's no table already displayed
         if (!el.querySelector('table')) {
             el.innerHTML = '<div class="error">Error loading watchlist — will retry automatically</div>';
         }
@@ -689,8 +778,8 @@ function getConfidenceClass(c) {
     if (!c) return 'confidence-low';
     if (c >= 70) return 'confidence-high';
     if (c >= 40) return 'confidence-medium';
-            return 'confidence-low';
-        }
+    return 'confidence-low';
+}
 
 // ── Market movers ──────────────────────────────────────────
         async function refreshMarketMovers() {
@@ -871,41 +960,139 @@ function closeAnalysis() { document.getElementById('analysis-popup').style.displ
         const r = await fetch(`/api/screen-stocks?type=${t}&max_stocks=25`);
         const d = await r.json();
         if (d.error) alert('Error: '+d.error);
-        else { alert(`Found ${d.count} stocks (${d.screen_type}):\n${d.stocks.slice(0,10).join(', ')}${d.count>10?'...':''}`); refreshWatchlist(); refreshAutoWatchlistStatus(); }
+        else {
+            const added = d.added_to_watchlist || 0;
+            alert(`Found ${d.count} stocks (${d.screen_type}), ${added} new added to watchlist:\n${d.stocks.slice(0,15).join(', ')}${d.count>15?'...':''}`);
+            refreshWatchlist(); refreshAutoWatchlistStatus();
+        }
     } catch (e) { alert('Error: '+e.message); }
 }
 
 // ── Notifications ──────────────────────────────────────────
+// Trading council top picks
+let _topRecData = null;
+
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, function(ch) {
+        return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]);
+    });
+}
+
+function renderTopRecommendations(data) {
+    _topRecData = data;
+    const el = document.getElementById('top-recommendations');
+    const status = document.getElementById('top-rec-status');
+    const picks = data.recommendations || [];
+    status.textContent = `${picks.length} picks from ${data.candidate_count || 0} candidates${data.cached ? ' (cached)' : ''}`;
+
+    if (!picks.length) {
+        el.innerHTML = `<div class="loading">No actionable BUY candidates passed the council</div>
+            <pre style="white-space:pre-wrap;background:rgba(20,20,45,.7);padding:12px;border-radius:8px;margin-top:10px;color:#c7d2fe;">${escapeHtml(data.message_preview || '')}</pre>`;
+        return;
+    }
+
+    let html = `<table><thead><tr>
+        <th>Rank</th><th>Symbol</th><th>Buy Zone</th><th>Exit</th><th>Stop</th>
+        <th>Score</th><th>R/R</th><th>Challenge</th><th>Trade</th>
+    </tr></thead><tbody>`;
+    picks.forEach(p => {
+        const challenge = (p.objections && p.objections.length) ? p.objections[0] : 'None';
+        html += `<tr>
+            <td>${p.rank}</td>
+            <td><strong>${escapeHtml(p.symbol)}</strong></td>
+            <td>$${p.buy_zone ? p.buy_zone.toFixed(2) : 'N/A'}</td>
+            <td>$${p.exit_price ? p.exit_price.toFixed(2) : 'N/A'}</td>
+            <td>$${p.stop_loss ? p.stop_loss.toFixed(2) : 'N/A'}</td>
+            <td>${p.council_score ? p.council_score.toFixed(1) : '0.0'}</td>
+            <td>${p.risk_reward ? p.risk_reward.toFixed(2) : '0.00'}x</td>
+            <td>${escapeHtml(challenge)}</td>
+            <td><button class="btn btn-start" style="padding:4px 10px;font-size:.78em;" onclick="quickBuy('${escapeHtml(p.symbol)}','${escapeHtml(p.horizon)}')">Buy</button></td>
+        </tr>`;
+    });
+    html += `</tbody></table>
+        <pre style="white-space:pre-wrap;background:rgba(20,20,45,.7);padding:12px;border-radius:8px;margin-top:10px;color:#c7d2fe;">${escapeHtml(data.message_preview || '')}</pre>`;
+    el.innerHTML = html;
+}
+
+async function refreshTopRecommendations(force = false) {
+    const el = document.getElementById('top-recommendations');
+    const status = document.getElementById('top-rec-status');
+    const horizon = document.getElementById('top-horizon-select').value;
+    status.textContent = 'Council running...';
+    el.innerHTML = '<div class="loading">&#8987; Challenging candidates...</div>';
+    try {
+        const resp = await fetchWithTimeout(`/api/recommendations/top5?horizon=${horizon}&limit=5&universe_size=50&refresh=${force ? 'true' : 'false'}`, 120000);
+        const data = await resp.json();
+        if (data.error) {
+            el.innerHTML = `<div class="error">${escapeHtml(data.error)}</div>`;
+            status.textContent = 'Council failed';
+            return;
+        }
+        renderTopRecommendations(data);
+    } catch (e) {
+        el.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
+        status.textContent = 'Council failed';
+    }
+}
+
+async function sendTopRecommendations() {
+    const horizon = document.getElementById('top-horizon-select').value;
+    const target = document.getElementById('openclaw-target').value.trim();
+    const status = document.getElementById('top-rec-status');
+    status.textContent = 'Sending via OpenClaw...';
+    try {
+        const r = await fetch('/api/recommendations/top5/send-whatsapp', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({horizon, limit:5, universe_size:50, target})
+        });
+        const d = await r.json();
+        if (d.recommendations) renderTopRecommendations(d);
+        if (d.error) {
+            alert('Error: ' + d.error);
+            status.textContent = 'Send failed';
+        } else {
+            alert('OpenClaw WhatsApp sent');
+            status.textContent = 'WhatsApp sent';
+        }
+    } catch (e) {
+        alert('Error: '+e.message);
+        status.textContent = 'Send failed';
+    }
+}
+
 async function loadNotifConfig() {
     try {
         const r = await fetch('/api/notifications/config');
         const d = await r.json();
         if (!d.error) {
-            document.getElementById('notif-enabled').checked = d.enabled;
-            document.getElementById('notif-phone').value = d.phone_number || '';
-            document.getElementById('notif-status').textContent = d.enabled ? 'SMS alerts are ON' : 'SMS alerts are OFF';
+            document.getElementById('openclaw-enabled').checked = !!d.openclaw_enabled;
+            document.getElementById('openclaw-target').value = d.openclaw_target || '';
+            document.getElementById('notif-status').textContent = d.openclaw_enabled ? 'OpenClaw WhatsApp ON' : 'OpenClaw WhatsApp OFF';
         }
     } catch (e) { console.error(e); }
 }
 async function saveNotifConfig() {
-    const en = document.getElementById('notif-enabled').checked;
-    const phone = document.getElementById('notif-phone').value.trim();
+    const openclawEnabled = document.getElementById('openclaw-enabled').checked;
+    const openclawTarget = document.getElementById('openclaw-target').value.trim();
     try {
-        const r = await fetch('/api/notifications/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:en, phone_number:phone})});
+        const r = await fetch('/api/notifications/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({openclaw_enabled:openclawEnabled, openclaw_target:openclawTarget})});
         const d = await r.json();
         if (d.error) { alert('Error: '+d.error); }
         else { document.getElementById('notif-status').textContent = d.message; }
     } catch (e) { alert('Error: '+e.message); }
 }
-async function testNotification() {
+
+// ── Quick Buy / Sell ───────────────────────────────────────
+async function testOpenClawWhatsApp() {
+    const target = document.getElementById('openclaw-target').value.trim();
     try {
-        const r = await fetch('/api/notifications/test', {method:'POST'});
+        const r = await fetch('/api/notifications/test-whatsapp', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({target})});
         const d = await r.json();
         alert(d.message || d.error);
     } catch (e) { alert('Error: '+e.message); }
 }
 
-// ── Quick Buy / Sell ───────────────────────────────────────
 async function quickBuy(symbol, horizon) {
     const qty = prompt(`Buy ${symbol} (${horizon})\nEnter quantity (leave blank for auto-size):`, '');
     if (qty === null) return; // cancelled
