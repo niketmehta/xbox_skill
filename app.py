@@ -3,6 +3,8 @@ from flask_cors import CORS
 import json
 import math
 import numpy as np
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import threading
 import time as _time
@@ -69,9 +71,112 @@ def convert_numpy_types(obj):
 # ── Simple in-memory recommendations cache ─────────────────────
 _rec_cache = {}          # {horizon: {'data': [...], 'ts': float}}
 _REC_CACHE_TTL = 60      # seconds – serve cached data if < 60 s old
-_REC_MAX_SYMBOLS = 25    # analyse at most this many symbols per request
+_REC_ANALYSIS_SYMBOLS = 80
+_REC_DISPLAY_SYMBOLS = 25
+_REC_WORKERS = 5
 _top5_cache = {}         # {(horizon, limit, universe): {'data': {...}, 'ts': float}}
 _TOP5_CACHE_TTL = 300    # seconds
+
+_SYMBOL_RE = re.compile(r'^[A-Z0-9][A-Z0-9.\-]{0,9}$')
+
+def _parse_symbol_list(value):
+    raw_items = value if isinstance(value, list) else [value]
+    symbols = []
+    seen = set()
+    for raw in raw_items:
+        for token in re.split(r'[^A-Za-z0-9.\-]+', str(raw or '')):
+            symbol = token.strip().upper()
+            if not symbol or symbol in seen or not _SYMBOL_RE.match(symbol):
+                continue
+            seen.add(symbol)
+            symbols.append(symbol)
+    return symbols
+
+def _watchlist_symbols_for_analysis():
+    manual = getattr(trading_agent, 'manual_watchlist', []) or []
+    symbols = manual + list(getattr(trading_agent, 'watchlist', []) or [])
+    return trading_agent._unique_symbols(symbols)[:_REC_ANALYSIS_SYMBOLS]
+
+def _watchlist_assessment(symbol, horizon):
+    try:
+        analysis = trading_agent.analyze_symbol(symbol, horizon=horizon)
+        if analysis and 'recommendation' in analysis:
+            rec = analysis['recommendation']
+            return {
+                'symbol': symbol,
+                'current_price': analysis.get('current_price', 0),
+                'action': rec.get('action', 'HOLD'),
+                'confidence': rec.get('confidence', 0),
+                'position_size': rec.get('position_size', 0),
+                'stop_loss': rec.get('stop_loss', 0),
+                'take_profit': rec.get('take_profit', 0),
+                'horizon': horizon,
+                'timestamp': analysis.get('timestamp', datetime.now())
+            }
+    except Exception as e:
+        app.logger.error(f"Error analysing {symbol}: {e}")
+
+    return _watchlist_error_assessment(symbol, horizon)
+
+def _watchlist_error_assessment(symbol, horizon):
+    return {
+        'symbol': symbol,
+        'current_price': 0,
+        'action': 'ERROR',
+        'confidence': 0,
+        'position_size': 0,
+        'stop_loss': 0,
+        'take_profit': 0,
+        'horizon': horizon,
+        'timestamp': datetime.now()
+    }
+
+def _rank_watchlist_recommendations(recommendations):
+    manual = trading_agent._unique_symbols(getattr(trading_agent, 'manual_watchlist', []) or [])
+    manual_order = {symbol: idx for idx, symbol in enumerate(manual)}
+    action_order = {'BUY': 0, 'SELL': 1, 'HOLD': 2, 'ERROR': 3}
+
+    def auto_rank(rec):
+        confidence = _safe_float(rec.get('confidence') or 0)
+        action = str(rec.get('action') or '').upper()
+        return (-confidence, action_order.get(action, 9), rec.get('symbol') or '')
+
+    manual_rows = []
+    auto_rows = []
+    seen = set()
+    for rec in recommendations:
+        symbol = rec.get('symbol')
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        rec['manual'] = symbol in manual_order
+        if rec['manual']:
+            manual_rows.append(rec)
+        else:
+            auto_rows.append(rec)
+
+    manual_rows.sort(key=lambda rec: manual_order.get(rec.get('symbol'), len(manual_order)))
+    auto_rows.sort(key=auto_rank)
+    return (manual_rows + auto_rows)[:_REC_DISPLAY_SYMBOLS]
+
+def _build_watchlist_recommendations(symbols, horizon):
+    if not symbols:
+        return []
+    workers = min(_REC_WORKERS, len(symbols))
+    recommendations = []
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_to_symbol = {
+            executor.submit(_watchlist_assessment, symbol, horizon): symbol
+            for symbol in symbols
+        }
+        for future in as_completed(future_to_symbol):
+            try:
+                recommendations.append(future.result())
+            except Exception as e:
+                symbol = future_to_symbol[future]
+                app.logger.error(f"Error analysing {symbol}: {e}")
+                recommendations.append(_watchlist_error_assessment(symbol, horizon))
+    return _rank_watchlist_recommendations(recommendations)
 
 # ── Dashboard ───────────────────────────────────────────────────
 
@@ -339,13 +444,37 @@ def get_watchlist():
 def add_to_watchlist():
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
-    data = request.get_json()
-    symbol = data.get('symbol', '').upper()
-    if not symbol:
-        return jsonify({'error': 'Symbol is required'}), 400
+    data = request.get_json() or {}
+    symbols = _parse_symbol_list(data.get('symbols') or data.get('symbol'))
+    if not symbols:
+        return jsonify({'error': 'At least one valid symbol is required'}), 400
     try:
-        trading_agent.add_to_watchlist(symbol)
-        return jsonify({'message': f'Added {symbol} to watchlist'})
+        horizon = (data.get('horizon') or 'WEEK').upper()
+        if horizon not in ('WEEK', 'MONTH'):
+            horizon = 'WEEK'
+        added = []
+        already_present = []
+        for symbol in symbols:
+            if trading_agent.add_to_watchlist(symbol):
+                added.append(symbol)
+            else:
+                already_present.append(symbol)
+
+        _rec_cache.clear()
+        _top5_cache.clear()
+        assessments = [
+            _watchlist_assessment(symbol, horizon)
+            for symbol in symbols
+        ]
+        return jsonify(convert_numpy_types({
+            'message': f"Added/updated {len(symbols)} symbol(s): {', '.join(symbols)}",
+            'symbols': symbols,
+            'added': added,
+            'already_present': already_present,
+            'assessments': assessments,
+            'watchlist': trading_agent.watchlist,
+            'horizon': horizon
+        }))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -358,66 +487,70 @@ def remove_from_watchlist():
     if not symbol:
         return jsonify({'error': 'Symbol is required'}), 400
     try:
-        trading_agent.remove_from_watchlist(symbol)
-        return jsonify({'message': f'Removed {symbol} from watchlist'})
+        removed = trading_agent.remove_from_watchlist(symbol)
+        _rec_cache.clear()
+        _top5_cache.clear()
+        return jsonify({
+            'message': f"{'Removed' if removed else 'Did not find'} {symbol} in watchlist",
+            'removed': removed,
+            'watchlist': trading_agent.watchlist
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/watchlist/recommendations')
 def get_watchlist_recommendations():
-    """Get recommendations for watchlist symbols (cached, limited to fastest N)."""
+    """Get recommendations for watchlist symbols."""
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
     try:
         horizon = request.args.get('horizon', 'WEEK').upper()
         if horizon not in ('WEEK', 'MONTH'):
             horizon = 'WEEK'
+        refresh = request.args.get('refresh', 'false').lower() == 'true'
+        symbols = _watchlist_symbols_for_analysis()
 
         # ── Return cached data if fresh enough ─────────────────
         cached = _rec_cache.get(horizon)
-        if cached and (_time.time() - cached['ts']) < _REC_CACHE_TTL:
-            return jsonify({'recommendations': cached['data'],
-                            'horizon': horizon, 'cached': True})
+        if (
+            not refresh
+            and cached
+            and cached.get('symbols') == symbols
+            and (_time.time() - cached['ts']) < _REC_CACHE_TTL
+        ):
+            return jsonify({
+                'recommendations': cached['data'],
+                'horizon': horizon,
+                'cached': True,
+                'analyzed_count': cached.get('analyzed_count', len(symbols)),
+                'returned_count': len(cached['data']),
+                'candidate_count': len(symbols),
+                'analysis_limit': _REC_ANALYSIS_SYMBOLS,
+                'display_limit': _REC_DISPLAY_SYMBOLS,
+            })
 
-        # ── Build fresh recommendations (limit count) ──────────
-        symbols = list(trading_agent.watchlist)[:_REC_MAX_SYMBOLS]
-        recommendations = []
-        for symbol in symbols:
-            try:
-                analysis = trading_agent.analyze_symbol(symbol, horizon=horizon)
-                if analysis and 'recommendation' in analysis:
-                    rec = analysis['recommendation']
-                    recommendations.append({
-                        'symbol': symbol,
-                        'current_price': analysis.get('current_price', 0),
-                        'action': rec.get('action', 'HOLD'),
-                        'confidence': rec.get('confidence', 0),
-                        'position_size': rec.get('position_size', 0),
-                        'stop_loss': rec.get('stop_loss', 0),
-                        'take_profit': rec.get('take_profit', 0),
-                        'horizon': horizon,
-                        'timestamp': analysis.get('timestamp', datetime.now())
-                    })
-            except Exception as e:
-                app.logger.error(f"Error analysing {symbol}: {e}")
-                recommendations.append({
-                    'symbol': symbol,
-                    'current_price': 0,
-                    'action': 'ERROR',
-                    'confidence': 0,
-                    'position_size': 0,
-                    'stop_loss': 0,
-                    'take_profit': 0,
-                    'horizon': horizon,
-                    'timestamp': datetime.now()
-                })
+        # ── Build fresh recommendations ────────────────────────
+        recommendations = _build_watchlist_recommendations(symbols, horizon)
 
         recommendations = convert_numpy_types(recommendations)
 
         # ── Store in cache ─────────────────────────────────────
-        _rec_cache[horizon] = {'data': recommendations, 'ts': _time.time()}
+        _rec_cache[horizon] = {
+            'data': recommendations,
+            'ts': _time.time(),
+            'symbols': symbols,
+            'analyzed_count': len(symbols),
+        }
 
-        return jsonify({'recommendations': recommendations, 'horizon': horizon})
+        return jsonify({
+            'recommendations': recommendations,
+            'horizon': horizon,
+            'analyzed_count': len(symbols),
+            'returned_count': len(recommendations),
+            'candidate_count': len(symbols),
+            'analysis_limit': _REC_ANALYSIS_SYMBOLS,
+            'display_limit': _REC_DISPLAY_SYMBOLS,
+        })
     except Exception as e:
         app.logger.error(f"Error getting watchlist recommendations: {e}")
         return jsonify({'error': str(e)}), 500
@@ -432,9 +565,10 @@ def get_top_recommendations():
         horizon = request.args.get('horizon', 'WEEK').upper()
         if horizon not in ('WEEK', 'MONTH'):
             horizon = 'WEEK'
-        limit = max(1, min(request.args.get('limit', 5, type=int), 10))
-        universe_size = max(limit, min(request.args.get('universe_size', 50, type=int), 120))
         refresh = request.args.get('refresh', 'false').lower() == 'true'
+        limit = max(1, min(request.args.get('limit', 5, type=int), 10))
+        default_universe_size = Config.TOP_RECOMMENDATIONS_UNIVERSE_SIZE
+        universe_size = max(limit, min(request.args.get('universe_size', default_universe_size, type=int), 120))
         cache_key = (horizon, limit, universe_size)
 
         cached = _top5_cache.get(cache_key)
@@ -465,7 +599,8 @@ def send_top_recommendations_whatsapp():
         if horizon not in ('WEEK', 'MONTH'):
             horizon = 'WEEK'
         limit = max(1, min(int(data.get('limit') or 5), 10))
-        universe_size = max(limit, min(int(data.get('universe_size') or 50), 120))
+        default_universe_size = Config.TOP_RECOMMENDATIONS_UNIVERSE_SIZE
+        universe_size = max(limit, min(int(data.get('universe_size') or default_universe_size), 120))
         target = data.get('target') or None
 
         result = trading_agent.send_top_recommendations_whatsapp(
@@ -648,10 +783,9 @@ def screen_stocks():
         added = []
         for sym in screened_stocks:
             if sym not in trading_agent.watchlist:
-                trading_agent.watchlist.append(sym)
                 added.append(sym)
         if added:
-            trading_agent.watchlist = trading_agent.watchlist[:80]
+            trading_agent._set_watchlist(trading_agent.watchlist + added)
             app.logger.info(f"Screen added {len(added)} new symbols to watchlist")
 
         _rec_cache.clear()

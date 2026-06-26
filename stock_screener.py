@@ -24,7 +24,8 @@ class StockScreener:
             'small_cap': self._get_small_cap_symbols(),
             'high_volume': self._get_high_volume_stocks(),
             'popular_trading': self._get_popular_trading_stocks(),
-            'high_volatility': self._get_high_volatility_stocks()
+            'high_volatility': self._get_high_volatility_stocks(),
+            'sector_discovery': self._get_sector_discovery_symbols()
         }
     
     def screen_stocks(self, max_stocks: int = 80, screen_type: str = 'swing') -> List[str]:
@@ -53,19 +54,32 @@ class StockScreener:
             return self._screen_value_stocks(max_stocks)
         else:
             return self._screen_swing_stocks(max_stocks)
-    
+
+    def _merge_unique(self, *symbol_lists: List[str]) -> List[str]:
+        symbols = []
+        seen = set()
+        for symbol_list in symbol_lists:
+            for raw in symbol_list or []:
+                symbol = str(raw or "").strip().upper()
+                if not symbol or symbol in seen:
+                    continue
+                seen.add(symbol)
+                symbols.append(symbol)
+        return symbols
+
     def _screen_swing_stocks(self, max_stocks: int) -> List[str]:
         """Screen for optimal swing/position trading stocks."""
         
         # Combine multiple stock universes
-        candidate_symbols = list(set(
-            self.stock_universes['popular_trading'] +
-            self.stock_universes['high_volume'][:40] +
-            self.stock_universes['nyse'][:50] +
-            self.stock_universes['sp500'][:60] +
-            self.stock_universes['nasdaq100'][:40] +
-            self._get_current_market_movers(30)
-        ))
+        candidate_symbols = self._merge_unique(
+            self.stock_universes['sector_discovery'],
+            self._get_current_market_movers(100),
+            self.stock_universes['popular_trading'],
+            self.stock_universes['high_volume'][:60],
+            self.stock_universes['nyse'][:70],
+            self.stock_universes['sp500'][:90],
+            self.stock_universes['nasdaq100'][:70],
+        )
         
         screened_stocks = []
         
@@ -263,7 +277,12 @@ class StockScreener:
     def _screen_breakout_stocks(self, max_stocks: int) -> List[str]:
         """Screen for breakout opportunities"""
         
-        candidate_symbols = self.stock_universes['sp500'][:200]
+        candidate_symbols = self._merge_unique(
+            self.stock_universes['sector_discovery'],
+            self._get_current_market_movers(100),
+            self.stock_universes['sp500'],
+            self.stock_universes['nasdaq100'],
+        )
         breakout_stocks = []
         
         with ThreadPoolExecutor(max_workers=4) as executor:
@@ -333,7 +352,10 @@ class StockScreener:
         """Screen for momentum stocks"""
         
         # Get recent market movers
-        movers = self._get_current_market_movers(100)
+        movers = self._merge_unique(
+            self._get_current_market_movers(120),
+            self.stock_universes['sector_discovery'],
+        )
         
         momentum_stocks = []
         
@@ -352,17 +374,21 @@ class StockScreener:
     
     def _screen_high_volume_stocks(self, max_stocks: int) -> List[str]:
         """Screen for high volume stocks"""
-        return self.stock_universes['high_volume'][:max_stocks]
+        return self._merge_unique(
+            self.stock_universes['sector_discovery'],
+            self.stock_universes['high_volume'],
+        )[:max_stocks]
     
     def _screen_high_volatility_stocks(self, max_stocks: int) -> List[str]:
         """Screen for high volatility stocks"""
         try:
             # Combine high volatility universe with additional screening
-            candidate_symbols = list(set(
-                self.stock_universes['high_volatility'] +
-                self.stock_universes['small_cap'][:30] +
-                self._get_current_market_movers(20)
-            ))
+            candidate_symbols = self._merge_unique(
+                self.stock_universes['sector_discovery'],
+                self.stock_universes['high_volatility'],
+                self.stock_universes['small_cap'][:30],
+                self._get_current_market_movers(80),
+            )
             
             high_volatility_stocks = []
             
@@ -411,7 +437,8 @@ class StockScreener:
         try:
             # Common S&P 500 symbols (subset for efficiency)
             sp500_symbols = [
-                'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'GOOG', 'TSLA', 'META', 'NVDA',
+                'SNDK', 'WDC', 'STX', 'MU', 'MRVL', 'AVGO', 'AMD', 'NVDA',
+                'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'GOOG', 'TSLA', 'META',
                 'BRK-B', 'UNH', 'JNJ', 'JPM', 'V', 'PG', 'XOM', 'HD', 'CVX',
                 'MA', 'BAC', 'ABBV', 'PFE', 'AVGO', 'KO', 'LLY', 'PEP', 'TMO',
                 'COST', 'WMT', 'DIS', 'ABT', 'DHR', 'ACN', 'VZ', 'ADBE', 'NEE',
@@ -426,13 +453,30 @@ class StockScreener:
     def _get_nasdaq100_symbols(self) -> List[str]:
         """Get NASDAQ 100 symbols"""
         nasdaq100_symbols = [
-            'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'GOOG', 'TSLA', 'META', 'NVDA',
-            'AVGO', 'ORCL', 'CRM', 'NFLX', 'ADBE', 'TXN', 'QCOM', 'COST',
+            'SNDK', 'WDC', 'STX', 'MU', 'MRVL', 'ARM', 'SMCI', 'AVGO', 'AMD',
+            'NVDA', 'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'GOOG', 'TSLA', 'META',
+            'ORCL', 'CRM', 'NFLX', 'ADBE', 'TXN', 'QCOM', 'COST',
             'PEP', 'AMD', 'INTC', 'CMCSA', 'TMUS', 'HON', 'AMGN', 'SBUX',
             'INTU', 'ISRG', 'BKNG', 'ADP', 'GILD', 'ADI', 'MDLZ', 'MU',
             'PYPL', 'LRCX', 'REGN', 'ATVI', 'FISV', 'CSX', 'MRNA', 'KLAC'
         ]
         return nasdaq100_symbols
+
+    def _get_sector_discovery_symbols(self) -> List[str]:
+        """Broad internal sector map used for automatic opportunity discovery."""
+        return [
+            'SNDK', 'WDC', 'STX', 'MU', 'MRVL', 'PSTG', 'NTAP', 'DELL', 'HPE',
+            'SMCI', 'ARM', 'AVGO', 'AMD', 'NVDA', 'QCOM', 'ADI', 'LRCX',
+            'KLAC', 'AMAT', 'TSM', 'ASML', 'ON', 'NXPI', 'MPWR', 'COHR',
+            'AAPL', 'MSFT', 'GOOGL', 'META', 'AMZN', 'NFLX', 'ORCL', 'CRM',
+            'NOW', 'ADBE', 'PANW', 'CRWD', 'SNOW', 'PLTR', 'SHOP', 'UBER',
+            'JPM', 'BAC', 'GS', 'MS', 'V', 'MA', 'AXP', 'SCHW', 'BLK',
+            'UNH', 'LLY', 'JNJ', 'ABBV', 'MRK', 'TMO', 'DHR', 'ISRG', 'REGN',
+            'XOM', 'CVX', 'COP', 'SLB', 'LNG', 'OXY', 'EOG',
+            'CAT', 'DE', 'GE', 'HON', 'BA', 'RTX', 'LMT', 'UPS', 'CSX',
+            'WMT', 'COST', 'HD', 'LOW', 'NKE', 'SBUX', 'MCD', 'DIS',
+            'KO', 'PEP', 'PG', 'PM', 'MDLZ'
+        ]
     
     def _get_nyse_symbols(self) -> List[str]:
         """Get NYSE symbols"""
@@ -463,6 +507,7 @@ class StockScreener:
     def _get_high_volatility_stocks(self) -> List[str]:
         """Get high volatility stocks"""
         high_volatility_stocks = [
+            'SNDK', 'WDC', 'STX', 'MU', 'MRVL', 'SMCI', 'ARM', 'DELL',
             'SPY', 'QQQ', 'AAPL', 'TSLA', 'AMD', 'NVDA', 'SQQQ', 'TQQQ',
             'IWM', 'EEM', 'XLF', 'GLD', 'SLV', 'VXX', 'UVXY', 'SPXL',
             'AMZN', 'MSFT', 'META', 'GOOGL', 'NFLX', 'BABA', 'NIO',
@@ -473,6 +518,7 @@ class StockScreener:
     def _get_high_volume_stocks(self) -> List[str]:
         """Get high volume stocks"""
         high_volume_stocks = [
+            'SNDK', 'WDC', 'STX', 'MU', 'MRVL', 'SMCI', 'ARM', 'DELL',
             'SPY', 'QQQ', 'AAPL', 'TSLA', 'AMD', 'NVDA', 'SQQQ', 'TQQQ',
             'IWM', 'EEM', 'XLF', 'GLD', 'SLV', 'VXX', 'UVXY', 'SPXL',
             'AMZN', 'MSFT', 'META', 'GOOGL', 'NFLX', 'BABA', 'NIO',
@@ -483,6 +529,7 @@ class StockScreener:
     def _get_popular_trading_stocks(self) -> List[str]:
         """Get popular liquid trading stocks."""
         popular_stocks = [
+            'SNDK', 'WDC', 'STX', 'MU', 'MRVL', 'SMCI', 'ARM', 'DELL',
             'SPY', 'QQQ', 'IWM', 'AAPL', 'TSLA', 'AMD', 'NVDA', 'MSFT',
             'AMZN', 'GOOGL', 'META', 'NFLX', 'BABA', 'DIS', 'V', 'JPM',
             'BAC', 'XOM', 'CVX', 'JNJ', 'PG', 'KO', 'PFE', 'T', 'VZ',
@@ -495,10 +542,11 @@ class StockScreener:
     def _screen_value_stocks(self, max_stocks: int) -> List[str]:
         """Screen for value stocks with reasonable P/E and solid fundamentals."""
         
-        candidate_symbols = list(set(
-            self.stock_universes['sp500'][:60] +
-            self.stock_universes['nyse'][:40]
-        ))
+        candidate_symbols = self._merge_unique(
+            self.stock_universes['sp500'][:60],
+            self.stock_universes['nyse'][:40],
+            self.stock_universes['sector_discovery'],
+        )
         
         value_stocks = []
         
@@ -585,11 +633,14 @@ class StockScreener:
             value_stocks = self._screen_value_stocks(size // 6)
             sp500_stocks = self.stock_universes['sp500'][:size // 6]
             
-            # Combine and deduplicate
-            combined_stocks = list(set(
-                swing_stocks + momentum_stocks + breakout_stocks +
-                value_stocks + sp500_stocks
-            ))
+            combined_stocks = self._merge_unique(
+                self.stock_universes['sector_discovery'],
+                swing_stocks,
+                momentum_stocks,
+                breakout_stocks,
+                value_stocks,
+                sp500_stocks,
+            )
             
             # If not enough, pad with high-quality names
             if len(combined_stocks) < size:

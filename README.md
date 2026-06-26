@@ -81,7 +81,7 @@ ALPACA_SECRET_KEY=your_alpaca_secret_key_here
 
 # Trading Parameters
 MAX_PORTFOLIO_VALUE=10000      # Maximum portfolio value
-MAX_POSITION_SIZE=1000         # Maximum per position
+MAX_POSITION_SIZE=5000         # Maximum per position
 STOP_LOSS_PERCENTAGE=0.02      # 2% stop loss
 TAKE_PROFIT_PERCENTAGE=0.05    # 5% take profit
 MAX_DAILY_LOSS=500            # Maximum daily loss
@@ -94,17 +94,59 @@ OPENCLAW_CHANNEL=whatsapp
 OPENCLAW_ACCOUNT=
 OPENCLAW_WHATSAPP_TARGET=+1234567890
 OPENCLAW_TIMEOUT_SECONDS=45
+OPENCLAW_HANDSHAKE_TIMEOUT_MS=120000
+OPENCLAW_SEND_ATTEMPTS=4
+OPENCLAW_AUTO_RESTART=true
 
 # Optional scheduled WhatsApp digest
 TOP_RECOMMENDATIONS_ENABLED=false
-TOP_RECOMMENDATIONS_TIME=06:15
+TOP_RECOMMENDATIONS_TIME=05:35
 TOP_RECOMMENDATIONS_HORIZON=WEEK
+TOP_RECOMMENDATIONS_UNIVERSE_SIZE=100
+TOP_RECOMMENDATIONS_SMART_UNIVERSE=true
+TOP_RECOMMENDATIONS_MIN_CONFIDENCE=20
+TOP_RECOMMENDATIONS_HISTORY_LOOKBACK_DAYS=30
+TOP_RECOMMENDATIONS_HISTORY_MIN_TRADES=2
+TOP_RECOMMENDATIONS_MAX_PER_SECTOR=2
+COUNCIL_RAG_ENABLED=true
+COUNCIL_RAG_LOOKBACK_DAYS=45
+COUNCIL_RAG_MAX_LESSONS=6
+COUNCIL_RAG_SYMBOL_WEIGHT=1.0
+COUNCIL_RAG_SECTOR_WEIGHT=0.45
+COUNCIL_RAG_MARKET_WEIGHT=0.20
+COUNCIL_RAG_MAX_SCORE_ADJUSTMENT=14
+COUNCIL_RAG_MISSED_MOVER_MIN_CHANGE_PCT=3
+COUNCIL_RAG_MISSED_MOVER_WEIGHT=0.60
+HELD_MOMENTUM_ALERT_LIMIT=3
+INTRADAY_BREAKOUT_ALERT_LIMIT=5
+INTRADAY_BREAKOUT_MIN_CHANGE_PCT=2.0
+INTRADAY_BREAKOUT_MIN_VOLUME_RATIO=1.1
+SIMULATION_ENABLED=true
+SIMULATION_TOP_N=5
+SIMULATION_NOTIONAL_PER_PICK=1000
+SIMULATION_OPEN_TIME=06:35
+SIMULATION_MIDDAY_TIME=09:00
+SIMULATION_EOD_TIME=13:10
+SIMULATION_OPEN_WHATSAPP_ENABLED=true
+SIMULATION_BACKFILL_ON_SUMMARY=true
 ```
 
 ### OpenClaw Trading Council
 - `GET /api/recommendations/top5?horizon=WEEK&limit=5` runs the multi-agent council and returns challenged BUY candidates with buy zone, exit target, stop loss, risk/reward, objections, and a WhatsApp-ready digest.
 - `POST /api/recommendations/top5/send-whatsapp` regenerates the council digest and sends it through OpenClaw WhatsApp when `OPENCLAW_ENABLED=true`.
 - The council uses momentum, breakout, mean-reversion, volume, fundamentals, relative strength, macro risk, skeptic, and arbiter agents. Picks are saved to `trading_data.db` for audit.
+- Scheduled digests use a smart universe by default: current movers, momentum/breakout screens, the smart watchlist, default liquid names, and currently held positions.
+- The smart universe now uses an internal broad sector-discovery map plus live movers/screens, so emerging themes such as storage, memory, software, health care, energy, industrials, financials, and consumer names are evaluated without maintaining a user focus list.
+- Broad and leveraged ETFs are filtered automatically inside the council, keeping the output focused on individual equities without a user-maintained exclude list.
+- Recommendation ranking applies recent simulated open-entry performance feedback, cooling down repeated simulated losers and modestly rewarding symbols whose recent picks have worked.
+- The council has a local SQLite RAG memory: EOD simulation results write daily lessons by symbol, sector, and market; the next recommendation run retrieves those lessons and adjusts scoring before ranking.
+- EOD learning also scans automatic market movers and records missed-opportunity lessons for strong positive movers that were not recommended, so the council learns from stocks it failed to surface.
+- Top picks are sector-balanced by default with `TOP_RECOMMENDATIONS_MAX_PER_SECTOR=2`, so one crowded theme does not consume every recommendation slot.
+- Recommendation payloads save the screened universe and a lightweight candidate snapshot for later missed-pick audits.
+- Digests include supplemental "held momentum review" and "intraday breakout watch" sections so strong existing positions or fast movers can surface even when the conservative council does not mark them as fresh top BUY picks.
+- Scheduled digest/simulation jobs run on weekdays and also check the Alpaca US equities calendar at runtime, so weekends and market holidays are skipped cleanly.
+- MIDDAY/EOD simulation summaries backfill open-entry rows from the latest recommendation run when the open-capture task was missed, and include all captured same-day recommendation runs so earlier picks are not hidden.
+- Backfill or inspect learning with `py -3 scripts\rebuild_council_memory.py` and `py -3 scripts\analyze_recommendation_history.py`.
 
 ### Trading Hours
 - **Market Hours**: 9:30 AM - 4:00 PM ET

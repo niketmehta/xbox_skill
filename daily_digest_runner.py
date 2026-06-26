@@ -7,6 +7,7 @@ from pathlib import Path
 import schedule
 
 from config import Config
+from market_calendar import MarketCalendar
 from trading_agent import TradingAgent
 from trade_simulator import (
     TradeSimulationEngine,
@@ -36,6 +37,32 @@ def configure_logging():
     )
 
 
+def should_run_market_job(job_name: str) -> bool:
+    session = MarketCalendar().get_session()
+    if session.get("is_trading_day"):
+        return True
+
+    logging.getLogger("daily_digest_runner").info(
+        "Skipping %s: market is closed on %s (%s via %s)",
+        job_name,
+        session.get("date", "today"),
+        session.get("reason", "no market session"),
+        session.get("source", "unknown"),
+    )
+    return False
+
+
+def schedule_weekdays(run_time: str, job_func, *args, **kwargs):
+    for weekday in (
+        schedule.every().monday,
+        schedule.every().tuesday,
+        schedule.every().wednesday,
+        schedule.every().thursday,
+        schedule.every().friday,
+    ):
+        weekday.at(run_time).do(job_func, *args, **kwargs)
+
+
 def send_digest_once() -> bool:
     config = Config()
     logger = logging.getLogger("daily_digest_runner")
@@ -43,6 +70,8 @@ def send_digest_once() -> bool:
     if not config.TOP_RECOMMENDATIONS_ENABLED:
         logger.warning("Top recommendations digest is disabled")
         return False
+    if not should_run_market_job("top recommendations digest"):
+        return True
 
     logger.info(
         "Generating scheduled top recommendations digest [%s]",
@@ -52,7 +81,7 @@ def send_digest_once() -> bool:
     result = agent.send_top_recommendations_whatsapp(
         horizon=config.TOP_RECOMMENDATIONS_HORIZON,
         limit=5,
-        universe_size=50,
+        universe_size=config.TOP_RECOMMENDATIONS_UNIVERSE_SIZE,
     )
     sent = bool(result.get("delivery", {}).get("sent"))
     symbols = [pick.get("symbol") for pick in result.get("recommendations", [])]
@@ -69,6 +98,8 @@ def capture_open_simulation_once() -> bool:
     if not config.SIMULATION_ENABLED:
         logger.warning("Recommendation simulation is disabled")
         return False
+    if not should_run_market_job("open simulation capture"):
+        return True
 
     simulator = TradeSimulationEngine()
     result = simulator.capture_open_trades(top_n=config.SIMULATION_TOP_N)
@@ -107,14 +138,29 @@ def send_eod_summary_once(dry_run: bool = False, label: str = "EOD") -> bool:
     if not config.SIMULATION_ENABLED:
         logger.warning("Recommendation simulation is disabled")
         return False
+    if not dry_run and not should_run_market_job(f"{label} simulation summary"):
+        return True
 
     simulator = TradeSimulationEngine()
     if dry_run:
-        summary = simulator.build_eod_summary()
+        summary = simulator.build_eod_summary(
+            backfill_missing=config.SIMULATION_BACKFILL_ON_SUMMARY,
+            top_n=config.SIMULATION_TOP_N,
+        )
         print(format_simulation_summary_message(summary, label=label))
         return summary.get("trade_count", 0) > 0
 
     summary = simulator.send_eod_summary_whatsapp(label=label)
+    backfill = summary.get("backfill") or {}
+    if backfill:
+        logger.info(
+            "%s simulation backfill captured %s/%s trades",
+            label,
+            backfill.get("captured", 0),
+            backfill.get("requested", 0),
+        )
+        if backfill.get("errors"):
+            logger.warning("%s simulation backfill errors: %s", label, backfill.get("errors"))
     sent = bool(summary.get("delivery", {}).get("sent"))
     logger.info(
         "%s simulation summary sent=%s trades=%s total_pnl=%.2f",
@@ -124,31 +170,37 @@ def send_eod_summary_once(dry_run: bool = False, label: str = "EOD") -> bool:
         summary.get("total_pnl", 0),
     )
     if not sent:
-        logger.error("EOD simulation delivery failed: %s", summary.get("delivery", {}).get("error"))
+        logger.error(
+            "%s simulation delivery failed: %s",
+            label,
+            summary.get("delivery", {}).get("error"),
+        )
     return sent
 
 
 def run_daemon():
     config = Config()
     logger = logging.getLogger("daily_digest_runner")
-    schedule.every().day.at(config.TOP_RECOMMENDATIONS_TIME).do(send_digest_once)
+    schedule_weekdays(config.TOP_RECOMMENDATIONS_TIME, send_digest_once)
     if config.SIMULATION_ENABLED:
-        schedule.every().day.at(config.SIMULATION_OPEN_TIME).do(capture_open_simulation_once)
-        schedule.every().day.at(config.SIMULATION_MIDDAY_TIME).do(
+        schedule_weekdays(config.SIMULATION_OPEN_TIME, capture_open_simulation_once)
+        schedule_weekdays(
+            config.SIMULATION_MIDDAY_TIME,
             send_eod_summary_once,
             label="MIDDAY",
         )
-        schedule.every().day.at(config.SIMULATION_EOD_TIME).do(
+        schedule_weekdays(
+            config.SIMULATION_EOD_TIME,
             send_eod_summary_once,
             label="EOD",
         )
     logger.info(
-        "Daily digest scheduler running at %s every day",
+        "Daily digest scheduler running at %s on weekdays; market holidays are skipped",
         config.TOP_RECOMMENDATIONS_TIME,
     )
     if config.SIMULATION_ENABLED:
         logger.info(
-            "Simulation scheduler running at open=%s, midday=%s, and eod=%s every day",
+            "Simulation scheduler running at open=%s, midday=%s, and eod=%s on weekdays; market holidays are skipped",
             config.SIMULATION_OPEN_TIME,
             config.SIMULATION_MIDDAY_TIME,
             config.SIMULATION_EOD_TIME,

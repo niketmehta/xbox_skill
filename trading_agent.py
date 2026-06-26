@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from logging.handlers import RotatingFileHandler
 
 from config import Config
+from market_calendar import MarketCalendar
 from data_provider import MarketDataProvider
 from trading_strategy import TradingStrategy
 from portfolio_manager import PortfolioManager
@@ -33,6 +34,7 @@ class TradingAgent:
         self.logger = self._setup_logging()
 
         # Components
+        self.market_calendar = MarketCalendar()
         self.data_provider = MarketDataProvider()
         self.trading_strategy = TradingStrategy(self.data_provider)
         self.notifications = NotificationService()
@@ -54,6 +56,7 @@ class TradingAgent:
         self.scan_interval = 300  # 5 minutes between scans (swing trading is less urgent)
 
         # Watchlist
+        self.manual_watchlist = []
         self.watchlist = self._get_default_watchlist()
         self.auto_watchlist_enabled = True
         self.last_watchlist_update = datetime.min
@@ -87,27 +90,118 @@ class TradingAgent:
             'LLY', 'AVGO', 'CRM', 'ORCL', 'COST'
         ]
 
+    def _unique_symbols(self, symbols: List[str]) -> List[str]:
+        seen = set()
+        unique = []
+        for raw in symbols or []:
+            symbol = str(raw or "").strip().upper()
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            unique.append(symbol)
+        return unique
+
+    def _set_watchlist(self, symbols: List[str], limit: int = 80):
+        """Keep manual symbols at the front so they are always analysed first."""
+        ordered = self._unique_symbols(self.manual_watchlist + (symbols or []))
+        if limit and len(ordered) > limit:
+            manual = self._unique_symbols(self.manual_watchlist)
+            manual_set = set(manual)
+            rest = [symbol for symbol in ordered if symbol not in manual_set]
+            ordered = manual + rest[: max(0, limit - len(manual))]
+        self.watchlist = ordered
+
+    def build_recommendation_universe(self, universe_size: Optional[int] = None) -> List[str]:
+        """Build a wider, current universe for scheduled top-pick digests."""
+        manual = self._unique_symbols(self.manual_watchlist)
+        requested_size = max(10, min(int(universe_size or self.config.TOP_RECOMMENDATIONS_UNIVERSE_SIZE), 120))
+        size = max(requested_size, min(len(manual), 120))
+        if not self.config.TOP_RECOMMENDATIONS_SMART_UNIVERSE:
+            return self._unique_symbols(manual + self.watchlist)[:size]
+
+        symbols = list(manual)
+
+        try:
+            movers = self.data_provider.get_market_movers(min(size, 80))
+            symbols.extend(mover.get("symbol") for mover in movers)
+        except Exception as e:
+            self.logger.warning("Could not add market movers to recommendation universe: %s", e)
+
+        try:
+            symbols.extend(
+                self.stock_screener.screen_stocks(
+                    max_stocks=min(25, max(size // 4, 10)),
+                    screen_type="momentum",
+                )
+            )
+        except Exception as e:
+            self.logger.warning("Could not add momentum stocks to recommendation universe: %s", e)
+
+        try:
+            symbols.extend(
+                self.stock_screener.screen_stocks(
+                    max_stocks=min(25, max(size // 4, 10)),
+                    screen_type="breakout",
+                )
+            )
+        except Exception as e:
+            self.logger.warning("Could not add breakout stocks to recommendation universe: %s", e)
+
+        try:
+            symbols.extend(self.stock_screener.get_smart_watchlist(size=size))
+        except Exception as e:
+            self.logger.warning("Could not add smart watchlist to recommendation universe: %s", e)
+
+        symbols.extend(self._get_default_watchlist())
+        symbols.extend(self.watchlist)
+        symbols.extend(getattr(self.portfolio_manager, "positions", {}).keys())
+
+        universe = self._unique_symbols(symbols)
+        if len(universe) > size:
+            manual_set = set(manual)
+            rest = [symbol for symbol in universe if symbol not in manual_set]
+            universe = manual + rest[: max(0, size - len(manual))]
+        if universe:
+            self._set_watchlist(universe)
+            self.last_watchlist_update = datetime.now()
+            self.logger.info("Recommendation universe prepared with %s symbols", len(universe))
+        return universe or self._unique_symbols(manual + self.watchlist)[:size]
+
+    def _schedule_weekdays(self, run_time: str, job_func, *args, **kwargs):
+        for weekday in (
+            schedule.every().monday,
+            schedule.every().tuesday,
+            schedule.every().wednesday,
+            schedule.every().thursday,
+            schedule.every().friday,
+        ):
+            weekday.at(run_time).do(job_func, *args, **kwargs)
+
     # ── Agent lifecycle ─────────────────────────────────────────────
 
     def start(self):
         self.is_running = True
         self.logger.info("Starting Trading Agent (swing/position mode)...")
 
-        schedule.every().day.at("06:00").do(self._daily_startup)
-        schedule.every().day.at("16:30").do(self._daily_review)
+        self._schedule_weekdays("06:00", self._daily_startup)
+        self._schedule_weekdays("16:30", self._daily_review)
         schedule.every().hour.do(self._hourly_portfolio_snapshot)
         if self.config.TOP_RECOMMENDATIONS_ENABLED:
-            schedule.every().day.at(self.config.TOP_RECOMMENDATIONS_TIME).do(
+            self._schedule_weekdays(
+                self.config.TOP_RECOMMENDATIONS_TIME,
                 self._send_scheduled_top_recommendations
             )
         if self.config.SIMULATION_ENABLED:
-            schedule.every().day.at(self.config.SIMULATION_OPEN_TIME).do(
+            self._schedule_weekdays(
+                self.config.SIMULATION_OPEN_TIME,
                 self._capture_scheduled_open_simulation
             )
-            schedule.every().day.at(self.config.SIMULATION_MIDDAY_TIME).do(
+            self._schedule_weekdays(
+                self.config.SIMULATION_MIDDAY_TIME,
                 self._send_scheduled_midday_simulation_summary
             )
-            schedule.every().day.at(self.config.SIMULATION_EOD_TIME).do(
+            self._schedule_weekdays(
+                self.config.SIMULATION_EOD_TIME,
                 self._send_scheduled_simulation_summary
             )
 
@@ -134,6 +228,20 @@ class TradingAgent:
 
     def _check_market_status(self):
         self.is_market_hours = self.data_provider.is_market_open()
+
+    def _should_run_market_job(self, job_name: str) -> bool:
+        session = self.market_calendar.get_session()
+        if session.get("is_trading_day"):
+            return True
+
+        self.logger.info(
+            "Skipping %s: market is closed on %s (%s via %s)",
+            job_name,
+            session.get("date", "today"),
+            session.get("reason", "no market session"),
+            session.get("source", "unknown"),
+        )
+        return False
 
     # ── Main trading loop ───────────────────────────────────────────
 
@@ -262,6 +370,9 @@ class TradingAgent:
     # ── Daily routines ──────────────────────────────────────────────
 
     def _daily_startup(self):
+        if not self._should_run_market_job("daily startup"):
+            return
+
         self.logger.info("Daily startup routine...")
         self.portfolio_manager.reset_daily_metrics()
         self.recommendations.clear()
@@ -272,13 +383,16 @@ class TradingAgent:
             try:
                 movers = self.data_provider.get_market_movers(50)
                 top_movers = [m['symbol'] for m in movers[:20]]
-                self.watchlist = list(set(self._get_default_watchlist() + top_movers))
+                self._set_watchlist(self._get_default_watchlist() + top_movers)
                 self.logger.info(f"Updated watchlist with {len(self.watchlist)} symbols")
             except Exception as e:
                 self.logger.error(f"Error updating watchlist: {e}")
 
     def _daily_review(self):
         """End-of-day review — NO forced liquidation for swing/position trades."""
+        if not self._should_run_market_job("daily review"):
+            return
+
         self.logger.info("Daily review (no forced liquidation)...")
         self.portfolio_manager.save_portfolio_snapshot()
 
@@ -297,17 +411,26 @@ class TradingAgent:
             self.portfolio_manager.save_portfolio_snapshot()
 
     def _send_scheduled_top_recommendations(self):
+        if not self._should_run_market_job("scheduled trading council digest"):
+            return
+
         horizon = self.config.TOP_RECOMMENDATIONS_HORIZON
         self.logger.info("Sending scheduled trading council digest [%s]", horizon)
         result = self.send_top_recommendations_whatsapp(
             horizon=horizon,
             limit=5,
-            universe_size=50,
+            universe_size=self.config.TOP_RECOMMENDATIONS_UNIVERSE_SIZE,
         )
         if not result.get('delivery', {}).get('sent'):
-            self.logger.warning("Scheduled trading council digest was not delivered")
+            self.logger.warning(
+                "Scheduled trading council digest was not delivered: %s",
+                result.get("delivery", {}).get("error"),
+            )
 
     def _capture_scheduled_open_simulation(self):
+        if not self._should_run_market_job("scheduled open simulation capture"):
+            return
+
         self.logger.info("Capturing simulated open entries for top recommendations")
         result = self.trade_simulator.capture_open_trades(
             top_n=self.config.SIMULATION_TOP_N
@@ -321,6 +444,9 @@ class TradingAgent:
             self.logger.warning("Open simulation errors: %s", result.get("errors"))
 
     def _send_scheduled_simulation_summary(self):
+        if not self._should_run_market_job("scheduled end-of-day simulation summary"):
+            return
+
         self.logger.info("Sending simulated end-of-day P&L summary")
         result = self.trade_simulator.send_eod_summary_whatsapp(label="EOD")
         if not result.get("delivery", {}).get("sent"):
@@ -330,6 +456,9 @@ class TradingAgent:
             )
 
     def _send_scheduled_midday_simulation_summary(self):
+        if not self._should_run_market_job("scheduled midday simulation summary"):
+            return
+
         self.logger.info("Sending simulated midday P&L summary")
         result = self.trade_simulator.send_eod_summary_whatsapp(label="MIDDAY")
         if not result.get("delivery", {}).get("sent"):
@@ -398,14 +527,26 @@ class TradingAgent:
     # ── Watchlist management ────────────────────────────────────────
 
     def add_to_watchlist(self, symbol: str):
-        if symbol not in self.watchlist:
-            self.watchlist.append(symbol.upper())
-            self.logger.info(f"Added {symbol} to watchlist")
+        symbol = str(symbol or "").strip().upper()
+        if not symbol:
+            return False
+        was_new = symbol not in self.watchlist and symbol not in self.manual_watchlist
+        if symbol not in self.manual_watchlist:
+            self.manual_watchlist.append(symbol)
+        self._set_watchlist([symbol] + self.watchlist)
+        self.logger.info("Added %s to manual watchlist", symbol)
+        return was_new
 
     def remove_from_watchlist(self, symbol: str):
-        if symbol in self.watchlist:
-            self.watchlist.remove(symbol.upper())
-            self.logger.info(f"Removed {symbol} from watchlist")
+        symbol = str(symbol or "").strip().upper()
+        if not symbol:
+            return False
+        removed = symbol in self.watchlist or symbol in self.manual_watchlist
+        self.manual_watchlist = [item for item in self.manual_watchlist if item != symbol]
+        self.watchlist = [item for item in self.watchlist if item != symbol]
+        if removed:
+            self.logger.info("Removed %s from watchlist", symbol)
+        return removed
 
     def force_liquidate(self):
         self.portfolio_manager.liquidate_all_positions("Manual liquidation")
@@ -417,14 +558,14 @@ class TradingAgent:
             self.logger.info("Updating smart watchlist...")
             smart_watchlist = self.stock_screener.get_smart_watchlist(size=60)
             if smart_watchlist:
-                self.watchlist = smart_watchlist
+                self._set_watchlist(smart_watchlist)
                 self.last_watchlist_update = datetime.now()
                 self.logger.info(f"Smart watchlist updated with {len(self.watchlist)} stocks")
             else:
                 self.logger.warning("Smart watchlist failed, keeping current")
         except Exception as e:
             self.logger.error(f"Error updating smart watchlist: {e}")
-            self.watchlist = self._get_default_watchlist()
+            self._set_watchlist(self._get_default_watchlist())
 
     def _check_watchlist_update(self):
         now = datetime.now()
@@ -436,8 +577,7 @@ class TradingAgent:
                 breakout_stocks = self.stock_screener.screen_stocks(max_stocks=10, screen_type='breakout')
                 new_stocks = [s for s in momentum_stocks + breakout_stocks if s not in self.watchlist]
                 if new_stocks:
-                    self.watchlist.extend(new_stocks[:15])
-                    self.watchlist = self.watchlist[:80]
+                    self._set_watchlist(self.watchlist + new_stocks[:15])
                     self.logger.info(f"Added {len(new_stocks[:15])} new stocks to watchlist")
                 self.last_watchlist_update = now
             except Exception as e:
@@ -468,11 +608,12 @@ class TradingAgent:
         universe_size: int = 50,
     ) -> Dict:
         """Run the multi-agent council and return challenged top BUY candidates."""
+        symbols = self.build_recommendation_universe(universe_size)
         return self.recommendation_engine.get_top_recommendations(
-            symbols=self.watchlist,
+            symbols=symbols,
             horizon=horizon,
             limit=limit,
-            universe_size=universe_size,
+            universe_size=len(symbols),
         )
 
     def send_top_recommendations_whatsapp(
@@ -495,6 +636,7 @@ class TradingAgent:
             'sent': sent,
             'target': target or self.notifications.get_openclaw_target(),
             'message': body,
+            'error': self.notifications.get_last_error(),
         }
         return result
 

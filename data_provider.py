@@ -170,6 +170,9 @@ class MarketDataProvider:
             return tradeapi.TimeFrame.Hour
         return tradeapi.TimeFrame.Day
 
+    def _alpaca_symbol(self, symbol: str) -> str:
+        return symbol.strip().upper().replace('-', '.')
+
     def _fetch_alpaca_history(self, symbol: str, period: str = '3mo', interval: str = '1d') -> pd.DataFrame:
         cached = self._history_cache_get('alpaca', symbol, period, interval)
         if cached is not None:
@@ -183,6 +186,7 @@ class MarketDataProvider:
             return pd.DataFrame()
 
         start = self._period_start(period).strftime('%Y-%m-%dT%H:%M:%SZ')
+        alpaca_symbol = self._alpaca_symbol(symbol)
         try:
             kwargs = {
                 'start': start,
@@ -190,13 +194,13 @@ class MarketDataProvider:
             }
             if self.config.ALPACA_DATA_FEED:
                 kwargs['feed'] = self.config.ALPACA_DATA_FEED
-            bars = api.get_bars(symbol, timeframe, **kwargs)
+            bars = api.get_bars(alpaca_symbol, timeframe, **kwargs)
             data = bars.df
             if data is None or data.empty:
                 return pd.DataFrame()
 
             if 'symbol' in data.columns:
-                data = data[data['symbol'] == symbol.upper()]
+                data = data[data['symbol'] == alpaca_symbol]
             rename = {
                 'open': 'Open',
                 'high': 'High',
@@ -624,12 +628,15 @@ class MarketDataProvider:
 
     # ── Market movers (cached, batch-downloaded) ───────────────────
     MOVERS_SYMBOLS = [
-        'SPY', 'QQQ', 'AAPL', 'TSLA', 'AMD', 'NVDA', 'MSFT', 'GOOGL',
-        'AMZN', 'META', 'NFLX', 'BABA', 'DIS', 'V', 'JPM', 'BAC',
-        'XOM', 'JNJ', 'PG', 'KO', 'PFE', 'T', 'VZ', 'WMT', 'HD',
-        'UNH', 'CVX', 'LLY', 'ABBV', 'CRM', 'ORCL', 'ACN', 'TMO',
-        'COST', 'ABT', 'DHR', 'TXN', 'NEE', 'PMT', 'LIN', 'NKE',
-        'CMCSA', 'INTC', 'COP', 'QCOM', 'HON', 'UPS', 'LOW', 'IBM'
+        'SNDK', 'WDC', 'STX', 'MU', 'MRVL', 'SMCI', 'ARM', 'DELL',
+        'PSTG', 'NTAP', 'AVGO', 'AMD', 'NVDA', 'QCOM', 'ADI', 'LRCX',
+        'KLAC', 'AMAT', 'TSM', 'ASML', 'SPY', 'QQQ', 'AAPL', 'TSLA',
+        'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'META', 'NFLX', 'BABA', 'DIS',
+        'V', 'JPM', 'BAC', 'XOM', 'JNJ', 'PG', 'KO', 'PFE', 'T', 'VZ',
+        'WMT', 'HD', 'UNH', 'CVX', 'LLY', 'ABBV', 'CRM', 'ORCL', 'ACN',
+        'TMO', 'COST', 'ABT', 'DHR', 'TXN', 'NEE', 'LIN', 'NKE',
+        'CMCSA', 'INTC', 'COP', 'HON', 'UPS', 'LOW', 'IBM', 'CSCO',
+        'NOW', 'PANW', 'CRWD', 'SNOW', 'PLTR', 'COIN', 'HOOD', 'RBLX'
     ]
 
     def get_market_movers(self, count: int = 25) -> List[Dict]:
@@ -640,7 +647,8 @@ class MarketDataProvider:
             return self._movers_cache[:count]
 
         try:
-            symbols = self.MOVERS_SYMBOLS[:count]
+            scan_count = min(len(self.MOVERS_SYMBOLS), max(int(count or 25), 100))
+            symbols = list(dict.fromkeys(self.MOVERS_SYMBOLS))[:scan_count]
             if self._prefer_yahoo():
                 try:
                     # Use one batch HTTP request instead of N calls
