@@ -116,9 +116,9 @@ class Config:
     VOLUME_SPIKE_THRESHOLD = 2.0
     
     # Flask Settings
-    FLASK_HOST = '0.0.0.0'
-    FLASK_PORT = 5001
-    FLASK_DEBUG = True
+    FLASK_HOST = os.getenv('FLASK_HOST', '0.0.0.0')
+    FLASK_PORT = int(os.getenv('FLASK_PORT', 5001))
+    FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'true').lower() == 'true'
     
     # ── Helpers ─────────────────────────────────────────────────────
     @classmethod

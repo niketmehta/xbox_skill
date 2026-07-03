@@ -1,0 +1,15 @@
+[Unit]
+Description=Trading dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=trader
+WorkingDirectory=/home/trader/xbox_skill
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/trader/xbox_skill/.venv/bin/gunicorn --workers 1 --threads 4 --timeout 180 --bind 127.0.0.1:5001 wsgi:app
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=Trading digest and simulation scheduler
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=trader
+WorkingDirectory=/home/trader/xbox_skill
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/trader/xbox_skill/.venv/bin/python daily_digest_runner.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
