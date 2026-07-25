@@ -868,7 +868,8 @@ def get_notification_config():
         return jsonify({
             'enabled': ns.is_enabled(),
             'openclaw_enabled': ns.is_openclaw_enabled(),
-            'openclaw_target': ns.get_openclaw_target()
+            'openclaw_target': ns.get_openclaw_target(),
+            'openclaw_allowed_targets': ns.get_openclaw_allowed_targets()
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -886,13 +887,18 @@ def update_notification_config():
         if 'openclaw_enabled' in data:
             ns.enable_openclaw(data['openclaw_enabled'])
         if 'openclaw_target' in data:
-            ns.set_openclaw_target(data['openclaw_target'])
+            if not ns.set_openclaw_target(data['openclaw_target']):
+                return jsonify({
+                    'error': 'Unsafe or unapproved OpenClaw WhatsApp target.',
+                    'detail': ns.get_last_error()
+                }), 400
         
         return jsonify({
             'message': 'Notification settings updated',
             'enabled': ns.is_enabled(),
             'openclaw_enabled': ns.is_openclaw_enabled(),
-            'openclaw_target': ns.get_openclaw_target()
+            'openclaw_target': ns.get_openclaw_target(),
+            'openclaw_allowed_targets': ns.get_openclaw_allowed_targets()
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500

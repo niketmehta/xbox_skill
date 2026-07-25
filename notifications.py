@@ -11,6 +11,7 @@ Sends alerts for:
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -44,11 +45,22 @@ class NotificationService:
         "timed out",
         "gateway closed",
     )
+    BLOCKED_TARGET_TOKENS = {
+        "all",
+        "everyone",
+        "contacts",
+        "all contacts",
+        "broadcast",
+        "broadcasts",
+        "groups",
+        "group",
+    }
 
     def __init__(self):
         self.config = Config()
         self._openclaw_enabled = self.config.OPENCLAW_ENABLED
         self._openclaw_target = self.config.OPENCLAW_WHATSAPP_TARGET
+        self._allowed_targets = set(self.config.OPENCLAW_ALLOWED_TARGETS)
         self._last_error = ""
 
     def is_enabled(self) -> bool:
@@ -65,13 +77,20 @@ class NotificationService:
         """Toggle OpenClaw WhatsApp delivery at runtime."""
         self._openclaw_enabled = bool(enabled)
 
-    def set_openclaw_target(self, target: str):
+    def set_openclaw_target(self, target: str) -> bool:
         """Update the OpenClaw WhatsApp destination at runtime."""
+        target = str(target or "").strip()
+        if not self._validate_openclaw_target(target):
+            return False
         self._openclaw_target = target
-        logger.info("OpenClaw WhatsApp target updated")
+        logger.info("OpenClaw WhatsApp target updated to %s", self._redact_target(target))
+        return True
 
     def get_openclaw_target(self) -> str:
         return self._openclaw_target or ""
+
+    def get_openclaw_allowed_targets(self) -> List[str]:
+        return sorted(self._redact_target(target) for target in self._allowed_targets)
 
     def get_last_error(self) -> str:
         return self._last_error
@@ -80,6 +99,37 @@ class NotificationService:
         self._last_error = message
         logger.error(message)
         return False
+
+    def _redact_target(self, target: str) -> str:
+        target = str(target or "")
+        if len(target) <= 4:
+            return "***"
+        return f"{target[:3]}...{target[-2:]}"
+
+    def _validate_openclaw_target(self, target: str) -> bool:
+        target = str(target or "").strip()
+        if not target:
+            return self._set_last_error("OpenClaw WhatsApp target is not configured")
+
+        if self.config.OPENCLAW_CHANNEL != "whatsapp":
+            return self._set_last_error("OpenClaw blocked: only the WhatsApp channel is allowed")
+
+        lowered = re.sub(r"\s+", " ", target.lower()).strip()
+        if lowered in self.BLOCKED_TARGET_TOKENS:
+            return self._set_last_error(
+                f"OpenClaw blocked unsafe WhatsApp target: {self._redact_target(target)}"
+            )
+
+        if any(separator in target for separator in (",", ";", "\n", "\r")):
+            return self._set_last_error("OpenClaw blocked multi-recipient WhatsApp target")
+
+        if self._allowed_targets and target not in self._allowed_targets:
+            return self._set_last_error(
+                "OpenClaw blocked target outside OPENCLAW_ALLOWED_TARGETS: "
+                f"{self._redact_target(target)}"
+            )
+
+        return True
 
     def _resolve_openclaw_cli(self) -> str:
         configured = self.config.OPENCLAW_CLI or "openclaw"
@@ -244,16 +294,17 @@ class NotificationService:
             return self._set_last_error("OpenClaw WhatsApp delivery disabled")
 
         destination = target or self._openclaw_target
-        if not destination:
-            return self._set_last_error("OpenClaw WhatsApp target is not configured")
+        if not self._validate_openclaw_target(destination):
+            return False
 
         openclaw_cmd = self._resolve_openclaw_command_prefix()
         first_line = body.splitlines()[0] if body else ""
         logger.info(
-            "OpenClaw WhatsApp message prepared chars=%s lines=%s cli=%s first_line=%r",
+            "OpenClaw WhatsApp message prepared chars=%s lines=%s cli=%s target=%s first_line=%r",
             len(body),
             len(body.splitlines()),
             Path(openclaw_cmd[0]).name,
+            self._redact_target(destination),
             first_line[:120],
         )
 

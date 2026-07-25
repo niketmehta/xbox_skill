@@ -94,6 +94,7 @@ OPENCLAW_CLI=openclaw
 OPENCLAW_CHANNEL=whatsapp
 OPENCLAW_ACCOUNT=
 OPENCLAW_WHATSAPP_TARGET=+1234567890
+OPENCLAW_ALLOWED_TARGETS=+1234567890
 OPENCLAW_TIMEOUT_SECONDS=45
 OPENCLAW_HANDSHAKE_TIMEOUT_MS=120000
 OPENCLAW_SEND_ATTEMPTS=4
@@ -152,6 +153,7 @@ PROFIT_TARGET_MONTHLY=2000
 ### OpenClaw Trading Council
 - `GET /api/recommendations/top5?horizon=WEEK&limit=5` runs the multi-agent council and returns challenged BUY candidates with buy zone, exit target, stop loss, risk/reward, objections, and a WhatsApp-ready digest.
 - `POST /api/recommendations/top5/send-whatsapp` regenerates the council digest and sends it through OpenClaw WhatsApp when `OPENCLAW_ENABLED=true`.
+- OpenClaw sends are restricted to `OPENCLAW_ALLOWED_TARGETS`; contact-list, broadcast, group-ish, multi-recipient, or unapproved targets are blocked before OpenClaw is invoked.
 - The council uses momentum, breakout, mean-reversion, volume, fundamentals, relative strength, macro risk, skeptic, and arbiter agents. Picks are saved to `trading_data.db` for audit.
 - Scheduled digests use a smart universe by default: current movers, momentum/breakout screens, the smart watchlist, default liquid names, and currently held positions.
 - The smart universe now uses an internal broad sector-discovery map plus live movers/screens, so emerging themes such as storage, memory, software, health care, energy, industrials, financials, and consumer names are evaluated without maintaining a user focus list.
