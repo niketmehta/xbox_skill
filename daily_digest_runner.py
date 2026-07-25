@@ -1,6 +1,7 @@
 import argparse
 import logging
 import time
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from market_calendar import MarketCalendar
 from trading_agent import TradingAgent
 from trade_simulator import (
     TradeSimulationEngine,
+    format_entry_alert_message,
     format_open_capture_message,
     format_simulation_summary_message,
 )
@@ -131,6 +133,93 @@ def capture_open_simulation_once() -> bool:
     return result.get("captured", 0) > 0
 
 
+def monitor_entry_alerts_once(historical: bool = False) -> bool:
+    config = Config()
+    logger = logging.getLogger("daily_digest_runner")
+
+    if not config.ENTRY_ALERTS_ENABLED:
+        logger.info("Entry-alert monitor is disabled")
+        return True
+    if not should_run_market_job("intraday entry-alert monitor"):
+        return True
+
+    simulator = TradeSimulationEngine()
+    window = simulator.entry_alert_window_status()
+    if not historical and not window.get("is_open"):
+        logger.info("Entry-alert monitor idle: %s", window.get("reason"))
+        return True
+
+    result = simulator.capture_entry_alerts(
+        top_n=config.SIMULATION_TOP_N,
+        max_alerts=config.ENTRY_ALERT_MAX_ALERTS_PER_SCAN,
+        historical=historical,
+    )
+    if result.get("error") == "No recommendation run found for today":
+        logger.warning("No recommendation run found for today; generating digest before entry scan")
+        if send_digest_once():
+            simulator = TradeSimulationEngine()
+            result = simulator.capture_entry_alerts(
+                top_n=config.SIMULATION_TOP_N,
+                max_alerts=config.ENTRY_ALERT_MAX_ALERTS_PER_SCAN,
+                historical=historical,
+            )
+
+    logger.info(
+        "Entry-alert scan captured %s/%s alerts; skipped_existing=%s",
+        result.get("captured", 0),
+        result.get("requested", 0),
+        result.get("skipped_existing", []),
+    )
+    if result.get("errors"):
+        logger.warning("Entry-alert scan errors: %s", result.get("errors"))
+
+    if result.get("captured", 0) <= 0:
+        return True
+
+    if config.ENTRY_ALERT_WHATSAPP_ENABLED:
+        result = simulator.send_entry_alerts_whatsapp(result)
+        sent = bool(result.get("delivery", {}).get("sent"))
+        logger.info("Entry-alert WhatsApp sent=%s", sent)
+        if not sent:
+            logger.error(
+                "Entry-alert WhatsApp failed: %s",
+                result.get("delivery", {}).get("error"),
+            )
+        return sent
+
+    return True
+
+
+def run_entry_alert_window() -> bool:
+    config = Config()
+    logger = logging.getLogger("daily_digest_runner")
+    interval_seconds = max(1, int(config.ENTRY_ALERT_SCAN_INTERVAL_MINUTES)) * 60
+    end_at = _local_datetime_for_time(config.ENTRY_ALERT_END_TIME)
+
+    if datetime.now() > end_at:
+        logger.info("Entry-alert window already ended at %s", config.ENTRY_ALERT_END_TIME)
+        return True
+
+    logger.info(
+        "Entry-alert window monitor running until %s every %s minutes",
+        config.ENTRY_ALERT_END_TIME,
+        config.ENTRY_ALERT_SCAN_INTERVAL_MINUTES,
+    )
+    ok = True
+    while datetime.now() <= end_at:
+        ok = monitor_entry_alerts_once() and ok
+        remaining_seconds = max(0, (end_at - datetime.now()).total_seconds())
+        if remaining_seconds <= 0:
+            break
+        time.sleep(min(interval_seconds, remaining_seconds))
+    return ok
+
+
+def _local_datetime_for_time(value: str) -> datetime:
+    parsed_time = datetime.strptime(value, "%H:%M").time()
+    return datetime.combine(datetime.now().date(), parsed_time)
+
+
 def send_eod_summary_once(dry_run: bool = False, label: str = "EOD") -> bool:
     config = Config()
     logger = logging.getLogger("daily_digest_runner")
@@ -183,7 +272,12 @@ def run_daemon():
     logger = logging.getLogger("daily_digest_runner")
     schedule_weekdays(config.TOP_RECOMMENDATIONS_TIME, send_digest_once)
     if config.SIMULATION_ENABLED:
-        schedule_weekdays(config.SIMULATION_OPEN_TIME, capture_open_simulation_once)
+        if config.ENTRY_ALERTS_ENABLED:
+            schedule.every(max(1, config.ENTRY_ALERT_SCAN_INTERVAL_MINUTES)).minutes.do(
+                monitor_entry_alerts_once
+            )
+        else:
+            schedule_weekdays(config.SIMULATION_OPEN_TIME, capture_open_simulation_once)
         schedule_weekdays(
             config.SIMULATION_MIDDAY_TIME,
             send_eod_summary_once,
@@ -199,12 +293,22 @@ def run_daemon():
         config.TOP_RECOMMENDATIONS_TIME,
     )
     if config.SIMULATION_ENABLED:
-        logger.info(
-            "Simulation scheduler running at open=%s, midday=%s, and eod=%s on weekdays; market holidays are skipped",
-            config.SIMULATION_OPEN_TIME,
-            config.SIMULATION_MIDDAY_TIME,
-            config.SIMULATION_EOD_TIME,
-        )
+        if config.ENTRY_ALERTS_ENABLED:
+            logger.info(
+                "Entry-alert monitor scanning every %s minutes after open+%s min until close-%s min; summaries at midday=%s and eod=%s",
+                config.ENTRY_ALERT_SCAN_INTERVAL_MINUTES,
+                config.ENTRY_ALERT_SKIP_OPEN_MINUTES,
+                config.ENTRY_ALERT_SKIP_CLOSE_MINUTES,
+                config.SIMULATION_MIDDAY_TIME,
+                config.SIMULATION_EOD_TIME,
+            )
+        else:
+            logger.info(
+                "Simulation scheduler running at open=%s, midday=%s, and eod=%s on weekdays; market holidays are skipped",
+                config.SIMULATION_OPEN_TIME,
+                config.SIMULATION_MIDDAY_TIME,
+                config.SIMULATION_EOD_TIME,
+            )
 
     while True:
         schedule.run_pending()
@@ -222,6 +326,21 @@ def main():
         "--capture-open",
         action="store_true",
         help="Capture simulated entries for the latest recommendations and exit.",
+    )
+    parser.add_argument(
+        "--monitor-entry-alerts",
+        action="store_true",
+        help="Scan top recommendations for intraday dip-entry alerts and exit.",
+    )
+    parser.add_argument(
+        "--run-window",
+        action="store_true",
+        help="Keep scanning entry alerts until ENTRY_ALERT_END_TIME.",
+    )
+    parser.add_argument(
+        "--historical-entry-backfill",
+        action="store_true",
+        help="Score the full entry window instead of only the latest candle.",
     )
     parser.add_argument(
         "--send-eod-summary",
@@ -243,6 +362,11 @@ def main():
         action="store_true",
         help="Print the latest open capture message shape and exit.",
     )
+    parser.add_argument(
+        "--print-entry-alert-message",
+        action="store_true",
+        help="Print the latest entry-alert message shape and exit.",
+    )
     args = parser.parse_args()
 
     configure_logging()
@@ -253,8 +377,22 @@ def main():
         capture = simulator.capture_open_trades(top_n=Config.SIMULATION_TOP_N)
         print(format_open_capture_message(capture))
         raise SystemExit(0 if capture.get("captured", 0) > 0 else 1)
+    if args.print_entry_alert_message:
+        simulator = TradeSimulationEngine()
+        capture = simulator.capture_entry_alerts(
+            top_n=Config.SIMULATION_TOP_N,
+            historical=args.historical_entry_backfill,
+        )
+        print(format_entry_alert_message(capture))
+        raise SystemExit(0 if capture.get("captured", 0) > 0 else 1)
     if args.capture_open:
         raise SystemExit(0 if capture_open_simulation_once() else 1)
+    if args.monitor_entry_alerts:
+        if args.run_window:
+            raise SystemExit(0 if run_entry_alert_window() else 1)
+        raise SystemExit(
+            0 if monitor_entry_alerts_once(historical=args.historical_entry_backfill) else 1
+        )
     if args.send_midday_summary:
         raise SystemExit(0 if send_eod_summary_once(dry_run=args.dry_run, label="MIDDAY") else 1)
     if args.send_eod_summary:

@@ -346,6 +346,7 @@
                 <option value="MONTH">1 Month</option>
             </select>
             <button class="btn" style="background:#22c55e;padding:6px 14px;font-size:.9em;" onclick="sendTopRecommendations()">Send WhatsApp</button>
+            <button class="btn" style="background:#0ea5e9;padding:6px 14px;font-size:.9em;" onclick="scanEntryAlerts()">Scan Dip Alerts</button>
             <span id="top-rec-status" style="font-size:.85em;color:#6b7280;"></span>
         </div>
         <div id="top-recommendations"><div class="loading">Run the council to generate challenged top picks</div></div>
@@ -1088,6 +1089,33 @@ async function sendTopRecommendations() {
     } catch (e) {
         alert('Error: '+e.message);
         status.textContent = 'Send failed';
+    }
+}
+
+async function scanEntryAlerts() {
+    const status = document.getElementById('top-rec-status');
+    status.textContent = 'Scanning dip entries...';
+    try {
+        const r = await fetch('/api/recommendations/entry-alerts/scan', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({top_n:5, max_alerts:2, send_whatsapp:true})
+        });
+        const d = await r.json();
+        if (d.error) {
+            alert('Error: ' + d.error);
+            status.textContent = 'Dip scan failed';
+            return;
+        }
+        const captured = d.captured || 0;
+        const requested = d.requested || 0;
+        status.textContent = captured ? `Dip alert sent (${captured}/${requested})` : `No dip triggers (${requested} checked)`;
+        if (d.delivery && d.delivery.sent === false) {
+            alert('Dip found, but WhatsApp failed: ' + (d.delivery.error || 'unknown error'));
+        }
+    } catch (e) {
+        alert('Error: '+e.message);
+        status.textContent = 'Dip scan failed';
     }
 }
 

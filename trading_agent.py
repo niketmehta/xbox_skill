@@ -54,6 +54,7 @@ class TradingAgent:
         self.is_market_hours = False
         self.last_scan_time = datetime.min
         self.scan_interval = 300  # 5 minutes between scans (swing trading is less urgent)
+        self._auto_trade_disabled_logged = False
 
         # Watchlist
         self.manual_watchlist = []
@@ -192,10 +193,15 @@ class TradingAgent:
                 self._send_scheduled_top_recommendations
             )
         if self.config.SIMULATION_ENABLED:
-            self._schedule_weekdays(
-                self.config.SIMULATION_OPEN_TIME,
-                self._capture_scheduled_open_simulation
-            )
+            if self.config.ENTRY_ALERTS_ENABLED:
+                schedule.every(
+                    max(1, self.config.ENTRY_ALERT_SCAN_INTERVAL_MINUTES)
+                ).minutes.do(self._monitor_scheduled_entry_alerts)
+            else:
+                self._schedule_weekdays(
+                    self.config.SIMULATION_OPEN_TIME,
+                    self._capture_scheduled_open_simulation
+                )
             self._schedule_weekdays(
                 self.config.SIMULATION_MIDDAY_TIME,
                 self._send_scheduled_midday_simulation_summary
@@ -321,6 +327,14 @@ class TradingAgent:
     # ── Trade execution ─────────────────────────────────────────────
 
     def _execute_trades(self):
+        if not self.config.AUTO_TRADE_ENABLED:
+            if not self._auto_trade_disabled_logged:
+                self.logger.info(
+                    "Automatic trade execution disabled; using alerts/manual approval."
+                )
+                self._auto_trade_disabled_logged = True
+            return
+
         for symbol, horizons in self.recommendations.items():
             for horizon, analysis in horizons.items():
                 try:
@@ -442,6 +456,38 @@ class TradingAgent:
         )
         if result.get("errors"):
             self.logger.warning("Open simulation errors: %s", result.get("errors"))
+
+    def _monitor_scheduled_entry_alerts(self):
+        if not self._should_run_market_job("scheduled entry-alert monitor"):
+            return
+
+        window = self.trade_simulator.entry_alert_window_status()
+        if not window.get("is_open"):
+            return
+
+        self.logger.info("Scanning top recommendations for intraday dip-entry alerts")
+        result = self.trade_simulator.capture_entry_alerts(
+            top_n=self.config.SIMULATION_TOP_N,
+            max_alerts=self.config.ENTRY_ALERT_MAX_ALERTS_PER_SCAN,
+        )
+        self.logger.info(
+            "Entry-alert scan captured %s/%s alerts",
+            result.get("captured", 0),
+            result.get("requested", 0),
+        )
+        if result.get("errors"):
+            self.logger.warning("Entry-alert scan errors: %s", result.get("errors"))
+
+        if (
+            self.config.ENTRY_ALERT_WHATSAPP_ENABLED
+            and result.get("captured", 0) > 0
+        ):
+            result = self.trade_simulator.send_entry_alerts_whatsapp(result)
+            if not result.get("delivery", {}).get("sent"):
+                self.logger.warning(
+                    "Entry-alert WhatsApp was not delivered: %s",
+                    result.get("delivery", {}).get("error"),
+                )
 
     def _send_scheduled_simulation_summary(self):
         if not self._should_run_market_job("scheduled end-of-day simulation summary"):

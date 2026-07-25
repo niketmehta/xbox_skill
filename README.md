@@ -9,7 +9,7 @@ An automated day trading system that analyzes real-time market data, recommends 
 - **Automatic Stock Picking**: Multi-agent council for Top N recommendations
 - **Multi-Strategy Analysis**: Momentum, mean reversion, breakout, and volume-based strategies
 - **Automatic Risk Management**: Stop-loss and take-profit mechanisms
-- **WhatsApp Digests**: OpenClaw messages for picks, simulated open entries, and EOD P/L
+- **WhatsApp Digests**: OpenClaw messages for picks, intraday dip-entry alerts, and EOD P/L
 - **Portfolio Management**: Position tracking, P&L calculation, and performance metrics
 
 ### Web Dashboard
@@ -82,6 +82,7 @@ ALPACA_SECRET_KEY=your_alpaca_secret_key_here
 # Trading Parameters
 MAX_PORTFOLIO_VALUE=10000      # Maximum portfolio value
 MAX_POSITION_SIZE=5000         # Maximum per position
+AUTO_TRADE_ENABLED=false       # Alerts/manual approval by default
 STOP_LOSS_PERCENTAGE=0.02      # 2% stop loss
 TAKE_PROFIT_PERCENTAGE=0.05    # 5% take profit
 MAX_DAILY_LOSS=500            # Maximum daily loss
@@ -97,6 +98,7 @@ OPENCLAW_TIMEOUT_SECONDS=45
 OPENCLAW_HANDSHAKE_TIMEOUT_MS=120000
 OPENCLAW_SEND_ATTEMPTS=4
 OPENCLAW_AUTO_RESTART=true
+OPENCLAW_RETRY_AMBIGUOUS_SENDS=false
 
 # Optional scheduled WhatsApp digest
 TOP_RECOMMENDATIONS_ENABLED=false
@@ -129,6 +131,22 @@ SIMULATION_MIDDAY_TIME=09:00
 SIMULATION_EOD_TIME=13:10
 SIMULATION_OPEN_WHATSAPP_ENABLED=true
 SIMULATION_BACKFILL_ON_SUMMARY=true
+ENTRY_ALERTS_ENABLED=true
+ENTRY_ALERT_START_TIME=07:00
+ENTRY_ALERT_END_TIME=12:30
+ENTRY_ALERT_SCAN_INTERVAL_MINUTES=10
+ENTRY_ALERT_SKIP_OPEN_MINUTES=30
+ENTRY_ALERT_SKIP_CLOSE_MINUTES=45
+ENTRY_ALERT_MIN_DIP_PCT=0.50
+ENTRY_ALERT_MIN_BOUNCE_PCT=0.15
+ENTRY_ALERT_MAX_CHASE_PCT=0.50
+ENTRY_ALERT_STOP_BUFFER_PCT=0.35
+ENTRY_ALERT_MIN_RISK_REWARD=1.40
+ENTRY_ALERT_MIN_TARGET_UPSIDE_PCT=1.0
+ENTRY_ALERT_MAX_ALERTS_PER_SCAN=2
+ENTRY_ALERT_WHATSAPP_ENABLED=true
+PROFIT_TARGET_WEEKLY=500
+PROFIT_TARGET_MONTHLY=2000
 ```
 
 ### OpenClaw Trading Council
@@ -138,14 +156,15 @@ SIMULATION_BACKFILL_ON_SUMMARY=true
 - Scheduled digests use a smart universe by default: current movers, momentum/breakout screens, the smart watchlist, default liquid names, and currently held positions.
 - The smart universe now uses an internal broad sector-discovery map plus live movers/screens, so emerging themes such as storage, memory, software, health care, energy, industrials, financials, and consumer names are evaluated without maintaining a user focus list.
 - Broad and leveraged ETFs are filtered automatically inside the council, keeping the output focused on individual equities without a user-maintained exclude list.
-- Recommendation ranking applies recent simulated open-entry performance feedback, cooling down repeated simulated losers and modestly rewarding symbols whose recent picks have worked.
+- Recommendation ranking applies recent simulated entry-alert performance feedback, cooling down repeated simulated losers and modestly rewarding symbols whose recent picks have worked.
 - The council has a local SQLite RAG memory: EOD simulation results write daily lessons by symbol, sector, and market; the next recommendation run retrieves those lessons and adjusts scoring before ranking.
 - EOD learning also scans automatic market movers and records missed-opportunity lessons for strong positive movers that were not recommended, so the council learns from stocks it failed to surface.
 - Top picks are sector-balanced by default with `TOP_RECOMMENDATIONS_MAX_PER_SECTOR=2`, so one crowded theme does not consume every recommendation slot.
 - Recommendation payloads save the screened universe and a lightweight candidate snapshot for later missed-pick audits.
 - Digests include supplemental "held momentum review" and "intraday breakout watch" sections so strong existing positions or fast movers can surface even when the conservative council does not mark them as fresh top BUY picks.
 - Scheduled digest/simulation jobs run on weekdays and also check the Alpaca US equities calendar at runtime, so weekends and market holidays are skipped cleanly.
-- MIDDAY/EOD simulation summaries backfill open-entry rows from the latest recommendation run when the open-capture task was missed, and include all captured same-day recommendation runs so earlier picks are not hidden.
+- Intraday entry alerts scan after the opening volatility window and look for a dip, bounce, usable stop distance, and improved risk/reward before sending a WhatsApp buy alert. Alerts are simulated entries only; live orders still require manual approval unless `AUTO_TRADE_ENABLED=true`.
+- MIDDAY/EOD simulation summaries backfill entry-alert rows from the latest recommendation run when the monitor was missed, and include all captured same-day recommendation runs so earlier picks are not hidden.
 - Backfill or inspect learning with `py -3 scripts\rebuild_council_memory.py` and `py -3 scripts\analyze_recommendation_history.py`.
 
 ### Trading Hours

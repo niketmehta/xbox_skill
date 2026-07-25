@@ -22,6 +22,10 @@ class Config:
     OPENCLAW_HANDSHAKE_TIMEOUT_MS = int(os.getenv('OPENCLAW_HANDSHAKE_TIMEOUT_MS', 120000))
     OPENCLAW_SEND_ATTEMPTS = int(os.getenv('OPENCLAW_SEND_ATTEMPTS', 4))
     OPENCLAW_AUTO_RESTART = os.getenv('OPENCLAW_AUTO_RESTART', 'true').lower() == 'true'
+    OPENCLAW_RETRY_AMBIGUOUS_SENDS = os.getenv('OPENCLAW_RETRY_AMBIGUOUS_SENDS', 'false').lower() == 'true'
+
+    # Live execution is opt-in. The default flow produces alerts and simulations only.
+    AUTO_TRADE_ENABLED = os.getenv('AUTO_TRADE_ENABLED', 'false').lower() == 'true'
 
     # Scheduled council digest
     TOP_RECOMMENDATIONS_ENABLED = os.getenv('TOP_RECOMMENDATIONS_ENABLED', 'false').lower() == 'true'
@@ -47,7 +51,7 @@ class Config:
     INTRADAY_BREAKOUT_MIN_CHANGE_PCT = float(os.getenv('INTRADAY_BREAKOUT_MIN_CHANGE_PCT', 2.0))
     INTRADAY_BREAKOUT_MIN_VOLUME_RATIO = float(os.getenv('INTRADAY_BREAKOUT_MIN_VOLUME_RATIO', 1.1))
 
-    # Simulated open-entry / end-of-day P&L summary
+    # Simulated entry alerts / end-of-day P&L summary
     SIMULATION_ENABLED = os.getenv('SIMULATION_ENABLED', 'true').lower() == 'true'
     SIMULATION_TOP_N = int(os.getenv('SIMULATION_TOP_N', 5))
     SIMULATION_NOTIONAL_PER_PICK = float(os.getenv('SIMULATION_NOTIONAL_PER_PICK', 1000))
@@ -56,6 +60,24 @@ class Config:
     SIMULATION_EOD_TIME = os.getenv('SIMULATION_EOD_TIME', '13:10')
     SIMULATION_OPEN_WHATSAPP_ENABLED = os.getenv('SIMULATION_OPEN_WHATSAPP_ENABLED', 'true').lower() == 'true'
     SIMULATION_BACKFILL_ON_SUMMARY = os.getenv('SIMULATION_BACKFILL_ON_SUMMARY', 'true').lower() == 'true'
+
+    # Intraday dip-entry alerts. Times are scheduler-local; market filters use Eastern market hours.
+    ENTRY_ALERTS_ENABLED = os.getenv('ENTRY_ALERTS_ENABLED', 'true').lower() == 'true'
+    ENTRY_ALERT_START_TIME = os.getenv('ENTRY_ALERT_START_TIME', '07:00')
+    ENTRY_ALERT_END_TIME = os.getenv('ENTRY_ALERT_END_TIME', '12:30')
+    ENTRY_ALERT_SCAN_INTERVAL_MINUTES = int(os.getenv('ENTRY_ALERT_SCAN_INTERVAL_MINUTES', 10))
+    ENTRY_ALERT_SKIP_OPEN_MINUTES = int(os.getenv('ENTRY_ALERT_SKIP_OPEN_MINUTES', 30))
+    ENTRY_ALERT_SKIP_CLOSE_MINUTES = int(os.getenv('ENTRY_ALERT_SKIP_CLOSE_MINUTES', 45))
+    ENTRY_ALERT_MIN_DIP_PCT = float(os.getenv('ENTRY_ALERT_MIN_DIP_PCT', 0.50))
+    ENTRY_ALERT_MIN_BOUNCE_PCT = float(os.getenv('ENTRY_ALERT_MIN_BOUNCE_PCT', 0.15))
+    ENTRY_ALERT_MAX_CHASE_PCT = float(os.getenv('ENTRY_ALERT_MAX_CHASE_PCT', 0.50))
+    ENTRY_ALERT_STOP_BUFFER_PCT = float(os.getenv('ENTRY_ALERT_STOP_BUFFER_PCT', 0.35))
+    ENTRY_ALERT_MIN_RISK_REWARD = float(os.getenv('ENTRY_ALERT_MIN_RISK_REWARD', 1.40))
+    ENTRY_ALERT_MIN_TARGET_UPSIDE_PCT = float(os.getenv('ENTRY_ALERT_MIN_TARGET_UPSIDE_PCT', 1.0))
+    ENTRY_ALERT_MAX_ALERTS_PER_SCAN = int(os.getenv('ENTRY_ALERT_MAX_ALERTS_PER_SCAN', 2))
+    ENTRY_ALERT_WHATSAPP_ENABLED = os.getenv('ENTRY_ALERT_WHATSAPP_ENABLED', 'true').lower() == 'true'
+    PROFIT_TARGET_WEEKLY = float(os.getenv('PROFIT_TARGET_WEEKLY', 500))
+    PROFIT_TARGET_MONTHLY = float(os.getenv('PROFIT_TARGET_MONTHLY', 2000))
     
     # Trading Parameters
     MAX_PORTFOLIO_VALUE = float(os.getenv('MAX_PORTFOLIO_VALUE', 10000))

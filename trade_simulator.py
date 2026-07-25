@@ -1,7 +1,7 @@
 import json
 import logging
 import sqlite3
-from datetime import date, datetime, time as dt_time
+from datetime import date, datetime, time as dt_time, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -15,7 +15,7 @@ from notifications import NotificationService
 
 
 class TradeSimulationEngine:
-    """Simulates buying recommendation picks near market open and marks them later."""
+    """Simulates recommendation entries and marks them later for feedback."""
 
     NON_STOCK_SYMBOLS = {
         "SPY", "QQQ", "IWM", "DIA", "EEM", "XLF", "XLK", "XLE", "XLY", "XLP",
@@ -105,6 +105,143 @@ class TradeSimulationEngine:
             "errors": errors,
         }
 
+    def capture_entry_alerts(
+        self,
+        trade_date: Optional[date] = None,
+        top_n: Optional[int] = None,
+        max_alerts: Optional[int] = None,
+        historical: bool = False,
+    ) -> Dict:
+        """Capture simulated entries when top picks hit intraday dip criteria."""
+        trade_date = trade_date or self._today_eastern()
+        top_n = max(1, min(int(top_n or self.config.SIMULATION_TOP_N), 10))
+        max_alerts = max(
+            1,
+            min(int(max_alerts or self.config.ENTRY_ALERT_MAX_ALERTS_PER_SCAN), top_n),
+        )
+        run = self._latest_recommendation_run(trade_date)
+        if not run:
+            return {
+                "trade_date": trade_date.isoformat(),
+                "mode": "intraday_dip_alert",
+                "captured": 0,
+                "error": "No recommendation run found for today",
+                "alerts": [],
+                "evaluated": [],
+            }
+
+        result = json.loads(run["payload_json"])
+        picks = result.get("recommendations", [])[:top_n]
+        existing_symbols = self._existing_simulated_symbols(trade_date, run["run_id"])
+        evaluated = []
+        skipped_existing = []
+        qualified = []
+        captured = []
+        errors = []
+
+        for pick in picks:
+            symbol = str(pick.get("symbol", "")).upper()
+            if not symbol:
+                continue
+
+            if symbol in existing_symbols:
+                skipped_existing.append(symbol)
+                continue
+
+            try:
+                alert = self._best_entry_alert_candidate(
+                    pick,
+                    trade_date=trade_date,
+                    historical=historical,
+                )
+                alert["rank"] = int(pick.get("rank") or 0)
+                evaluated.append(alert)
+                if alert.get("qualified"):
+                    qualified.append((self._safe_float(alert.get("entry_score")), pick, alert))
+            except Exception as exc:
+                self.logger.error("Could not evaluate entry alert for %s: %s", symbol, exc)
+                errors.append({"symbol": symbol, "error": str(exc)})
+
+        qualified.sort(key=lambda item: item[0], reverse=True)
+        for _, pick, alert in qualified[:max_alerts]:
+            try:
+                row = self._entry_alert_trade_row(
+                    run=run,
+                    result=result,
+                    pick=pick,
+                    alert=alert,
+                    trade_date=trade_date,
+                )
+                self._insert_simulated_trade(row)
+                captured.append(row)
+            except Exception as exc:
+                symbol = str(pick.get("symbol", "")).upper()
+                self.logger.error("Could not capture entry alert for %s: %s", symbol, exc)
+                errors.append({"symbol": symbol, "error": str(exc)})
+
+        start_dt, end_dt = self._entry_alert_bounds(trade_date)
+        return {
+            "trade_date": trade_date.isoformat(),
+            "run_id": run["run_id"],
+            "mode": "intraday_dip_alert",
+            "historical": historical,
+            "captured": len(captured),
+            "requested": len(picks),
+            "alerts": captured,
+            "evaluated": sorted(
+                evaluated,
+                key=lambda item: self._safe_float(item.get("entry_score")),
+                reverse=True,
+            ),
+            "skipped_existing": skipped_existing,
+            "errors": errors,
+            "window": {
+                "start": start_dt.isoformat(),
+                "end": end_dt.isoformat(),
+                "skip_open_minutes": self.config.ENTRY_ALERT_SKIP_OPEN_MINUTES,
+                "skip_close_minutes": self.config.ENTRY_ALERT_SKIP_CLOSE_MINUTES,
+            },
+            "target_weekly": self.config.PROFIT_TARGET_WEEKLY,
+            "target_monthly": self.config.PROFIT_TARGET_MONTHLY,
+        }
+
+    def send_entry_alerts_whatsapp(self, scan: Dict) -> Dict:
+        body = format_entry_alert_message(scan)
+        sent = self.notifications.send_openclaw_whatsapp(body)
+        scan["delivery"] = {
+            "channel": "openclaw_whatsapp",
+            "sent": sent,
+            "target": self.notifications.get_openclaw_target(),
+            "message": body,
+            "error": self.notifications.get_last_error(),
+        }
+        return scan
+
+    def entry_alert_window_status(self, now: Optional[datetime] = None) -> Dict:
+        now = now or datetime.now(self.eastern_tz)
+        if now.tzinfo is None:
+            now = self.eastern_tz.localize(now)
+        else:
+            now = now.astimezone(self.eastern_tz)
+
+        start_dt, end_dt = self._entry_alert_bounds(now.date())
+        is_open = start_dt <= now <= end_dt
+        return {
+            "is_open": is_open,
+            "now": now.isoformat(),
+            "window": {
+                "start": start_dt.isoformat(),
+                "end": end_dt.isoformat(),
+                "skip_open_minutes": self.config.ENTRY_ALERT_SKIP_OPEN_MINUTES,
+                "skip_close_minutes": self.config.ENTRY_ALERT_SKIP_CLOSE_MINUTES,
+            },
+            "reason": (
+                "inside intraday dip-entry window"
+                if is_open
+                else "outside intraday dip-entry window"
+            ),
+        }
+
     def build_eod_summary(
         self,
         trade_date: Optional[date] = None,
@@ -117,10 +254,14 @@ class TradeSimulationEngine:
         backfill_result = None
         if backfill_missing and not trades:
             self.logger.warning(
-                "No simulated trades found for %s; attempting open-entry backfill",
+                "No simulated trades found for %s; attempting entry-alert backfill",
                 trade_date.isoformat(),
             )
-            backfill_result = self.capture_open_trades(trade_date=trade_date, top_n=top_n)
+            backfill_result = self.capture_entry_alerts(
+                trade_date=trade_date,
+                top_n=top_n,
+                historical=True,
+            )
             trades = self._load_simulated_trades(trade_date)
 
         rows = []
@@ -276,6 +417,309 @@ class TradeSimulationEngine:
             return {"enabled": True, "lesson_date": trade_date, "lessons_written": 0, "error": str(exc)}
 
         return self.learning_memory.learn_from_missed_movers(trade_date, movers[:20])
+
+    def _entry_alert_bounds(self, trade_date: date) -> Tuple[datetime, datetime]:
+        market_open = datetime.strptime(self.config.MARKET_OPEN, "%H:%M").time()
+        market_close = datetime.strptime(self.config.MARKET_CLOSE, "%H:%M").time()
+        start_naive = datetime.combine(trade_date, market_open) + timedelta(
+            minutes=max(0, self.config.ENTRY_ALERT_SKIP_OPEN_MINUTES)
+        )
+        end_naive = datetime.combine(trade_date, market_close) - timedelta(
+            minutes=max(0, self.config.ENTRY_ALERT_SKIP_CLOSE_MINUTES)
+        )
+        return self.eastern_tz.localize(start_naive), self.eastern_tz.localize(end_naive)
+
+    def _regular_session_frame(self, day: pd.DataFrame) -> pd.DataFrame:
+        if day.empty:
+            return pd.DataFrame()
+        market_open = datetime.strptime(self.config.MARKET_OPEN, "%H:%M").time()
+        market_close = datetime.strptime(self.config.MARKET_CLOSE, "%H:%M").time()
+        return day[
+            (day["_eastern_time"] >= market_open)
+            & (day["_eastern_time"] <= market_close)
+        ].copy()
+
+    def _entry_window_positions(self, frame: pd.DataFrame, trade_date: date) -> List[int]:
+        if frame.empty:
+            return []
+        start_dt, end_dt = self._entry_alert_bounds(trade_date)
+        start_time = start_dt.time()
+        end_time = end_dt.time()
+        return [
+            idx
+            for idx, stamp_time in enumerate(frame["_eastern_time"])
+            if start_time <= stamp_time <= end_time
+        ]
+
+    def _best_entry_alert_candidate(
+        self,
+        pick: Dict,
+        trade_date: date,
+        historical: bool = False,
+    ) -> Dict:
+        symbol = str(pick.get("symbol", "")).upper()
+        intraday = self.data_provider.get_intraday_data(symbol, period="5d", interval="1m")
+        day = self._intraday_for_date(intraday, trade_date)
+        regular = self._regular_session_frame(day)
+        if regular.empty:
+            return self._empty_entry_alert(symbol, "No regular-session intraday data")
+
+        positions = self._entry_window_positions(regular, trade_date)
+        if not positions:
+            return self._empty_entry_alert(symbol, "No candles inside the entry-alert window")
+
+        if not historical:
+            positions = [positions[-1]]
+
+        best = None
+        for position in positions:
+            candidate = self._score_entry_alert_candidate(pick, regular, position)
+            if best is None or candidate.get("entry_score", 0) > best.get("entry_score", 0):
+                best = candidate
+        return best or self._empty_entry_alert(symbol, "No entry candidate could be scored")
+
+    def _empty_entry_alert(self, symbol: str, reason: str) -> Dict:
+        return {
+            "symbol": symbol,
+            "qualified": False,
+            "entry_score": 0.0,
+            "reasons": [],
+            "fail_reasons": [reason],
+        }
+
+    def _score_entry_alert_candidate(self, pick: Dict, frame: pd.DataFrame, position: int) -> Dict:
+        symbol = str(pick.get("symbol", "")).upper()
+        history = frame.iloc[: position + 1].copy()
+        row = history.iloc[-1]
+
+        price = self._safe_float(row.get("Close")) or self._safe_float(row.get("Open"))
+        if price <= 0:
+            return self._empty_entry_alert(symbol, "No usable intraday price")
+
+        reference_price = (
+            self._safe_float(pick.get("buy_zone"))
+            or self._safe_float(pick.get("current_price"))
+            or price
+        )
+        exit_target = self._safe_float(pick.get("exit_price"))
+        stop_loss = self._safe_float(pick.get("stop_loss"))
+        confidence = self._safe_float(pick.get("confidence"))
+        council_score = self._safe_float(pick.get("council_score"))
+
+        highs = pd.to_numeric(history["High"], errors="coerce").dropna()
+        lows = pd.to_numeric(history["Low"], errors="coerce").dropna()
+        closes = pd.to_numeric(history["Close"], errors="coerce").dropna()
+        session_high = self._safe_float(highs.max()) if not highs.empty else price
+        session_low = self._safe_float(lows.min()) if not lows.empty else price
+
+        drop_from_reference_pct = (
+            max(0.0, (reference_price - price) / reference_price * 100)
+            if reference_price > 0
+            else 0.0
+        )
+        chase_pct = (
+            max(0.0, (price - reference_price) / reference_price * 100)
+            if reference_price > 0
+            else 0.0
+        )
+        drop_from_high_pct = (
+            max(0.0, (session_high - price) / session_high * 100)
+            if session_high > 0
+            else 0.0
+        )
+        bounce_from_low_pct = (
+            max(0.0, (price - session_low) / session_low * 100)
+            if session_low > 0
+            else 0.0
+        )
+        risk_reward = self._risk_reward_for_entry(price, stop_loss, exit_target)
+        target_upside_pct = ((exit_target - price) / price * 100) if exit_target > price else 0.0
+        stop_risk_pct = ((price - stop_loss) / price * 100) if 0 < stop_loss < price else 0.0
+
+        ema_9 = self._safe_float(
+            closes.ewm(span=min(9, max(len(closes), 1)), adjust=False).mean().iloc[-1]
+        ) if not closes.empty else price
+        last3_change_pct = 0.0
+        if len(closes) >= 4 and closes.iloc[-4] > 0:
+            last3_change_pct = ((closes.iloc[-1] / closes.iloc[-4]) - 1) * 100
+        vwap = self._intraday_vwap(history) or price
+        volume_ratio = self._intraday_volume_ratio(history)
+
+        dip_pct = max(drop_from_reference_pct, drop_from_high_pct)
+        dip_enough = dip_pct >= self.config.ENTRY_ALERT_MIN_DIP_PCT
+        bounce_enough = bounce_from_low_pct >= self.config.ENTRY_ALERT_MIN_BOUNCE_PCT
+        near_buy_zone = chase_pct <= self.config.ENTRY_ALERT_MAX_CHASE_PCT
+        stop_buffer_ok = (
+            stop_loss > 0
+            and price > stop_loss * (1 + self.config.ENTRY_ALERT_STOP_BUFFER_PCT / 100)
+        )
+        risk_reward_ok = risk_reward >= self.config.ENTRY_ALERT_MIN_RISK_REWARD
+        upside_ok = target_upside_pct >= self.config.ENTRY_ALERT_MIN_TARGET_UPSIDE_PCT
+        confidence_ok = confidence >= self.config.TOP_RECOMMENDATIONS_MIN_CONFIDENCE
+        trend_turn = price >= ema_9 or last3_change_pct >= 0
+        reclaiming_vwap = price >= vwap * 0.9965 or last3_change_pct >= 0.05
+
+        fail_reasons = []
+        if not dip_enough:
+            fail_reasons.append(f"dip {dip_pct:.2f}% < {self.config.ENTRY_ALERT_MIN_DIP_PCT:.2f}%")
+        if not bounce_enough:
+            fail_reasons.append(
+                f"bounce {bounce_from_low_pct:.2f}% < {self.config.ENTRY_ALERT_MIN_BOUNCE_PCT:.2f}%"
+            )
+        if not near_buy_zone:
+            fail_reasons.append(
+                f"price is chasing buy zone by {chase_pct:.2f}%"
+            )
+        if not stop_buffer_ok:
+            fail_reasons.append("too close to stop loss")
+        if not risk_reward_ok:
+            fail_reasons.append(
+                f"risk/reward {risk_reward:.2f}x < {self.config.ENTRY_ALERT_MIN_RISK_REWARD:.2f}x"
+            )
+        if not upside_ok:
+            fail_reasons.append(
+                f"target upside {target_upside_pct:.2f}% < {self.config.ENTRY_ALERT_MIN_TARGET_UPSIDE_PCT:.2f}%"
+            )
+        if not confidence_ok:
+            fail_reasons.append("confidence below configured floor")
+        if not trend_turn:
+            fail_reasons.append("no short-term turn up yet")
+        if not reclaiming_vwap:
+            fail_reasons.append("has not reclaimed VWAP/short momentum")
+
+        qualified = not fail_reasons
+        entry_score = (
+            council_score * 0.35
+            + confidence * 0.15
+            + min(dip_pct, 4.0) * 10
+            + min(bounce_from_low_pct, 3.0) * 6
+            + min(risk_reward, 4.0) * 8
+            + min(target_upside_pct, 12.0) * 1.2
+            - min(stop_risk_pct, 10.0) * 0.6
+        )
+        if price <= vwap:
+            entry_score += 4
+        if trend_turn:
+            entry_score += 4
+        if not qualified:
+            entry_score -= 25
+
+        reasons = []
+        if qualified:
+            if drop_from_reference_pct >= self.config.ENTRY_ALERT_MIN_DIP_PCT:
+                reasons.append("discount to council buy zone")
+            elif drop_from_high_pct >= self.config.ENTRY_ALERT_MIN_DIP_PCT:
+                reasons.append("intraday pullback from high")
+            reasons.append("bounce from session low confirmed")
+            reasons.append(f"risk/reward {risk_reward:.2f}x")
+
+        entry_dt = row.get("_eastern_dt")
+        return {
+            "symbol": symbol,
+            "qualified": qualified,
+            "entry_score": round(max(entry_score, 0.0), 2),
+            "entry_price": round(price, 4),
+            "entry_time": entry_dt.isoformat() if hasattr(entry_dt, "isoformat") else datetime.now().isoformat(),
+            "reference_price": round(reference_price, 4),
+            "exit_target": exit_target,
+            "stop_loss": stop_loss,
+            "risk_reward": round(risk_reward, 2),
+            "target_upside_pct": round(target_upside_pct, 2),
+            "stop_risk_pct": round(stop_risk_pct, 2),
+            "drop_from_reference_pct": round(drop_from_reference_pct, 2),
+            "drop_from_high_pct": round(drop_from_high_pct, 2),
+            "bounce_from_low_pct": round(bounce_from_low_pct, 2),
+            "chase_pct": round(chase_pct, 2),
+            "session_high": round(session_high, 4),
+            "session_low": round(session_low, 4),
+            "vwap": round(vwap, 4),
+            "ema_9": round(ema_9, 4),
+            "last3_change_pct": round(last3_change_pct, 2),
+            "volume_ratio": round(volume_ratio, 2),
+            "confidence": confidence,
+            "council_score": council_score,
+            "reasons": reasons,
+            "fail_reasons": fail_reasons[:4],
+        }
+
+    def _entry_alert_trade_row(
+        self,
+        run: Dict,
+        result: Dict,
+        pick: Dict,
+        alert: Dict,
+        trade_date: date,
+    ) -> Dict:
+        entry_price = self._safe_float(alert.get("entry_price"))
+        notional = float(self.config.SIMULATION_NOTIONAL_PER_PICK)
+        quantity = round(notional / entry_price, 6) if entry_price > 0 else 0
+        return {
+            "trade_date": trade_date.isoformat(),
+            "run_id": run["run_id"],
+            "rank": int(pick.get("rank") or alert.get("rank") or 0),
+            "symbol": str(pick.get("symbol", "")).upper(),
+            "horizon": pick.get("horizon", result.get("horizon", "WEEK")),
+            "recommended_price": self._safe_float(pick.get("current_price")),
+            "entry_price": entry_price,
+            "entry_time": alert.get("entry_time") or datetime.now().isoformat(),
+            "quantity": quantity,
+            "notional": notional,
+            "exit_target": self._safe_float(pick.get("exit_price")),
+            "stop_loss": self._safe_float(pick.get("stop_loss")),
+            "confidence": self._safe_float(pick.get("confidence")),
+            "council_score": self._safe_float(pick.get("council_score")),
+            "open_source": "intraday_dip_alert",
+            "entry_score": alert.get("entry_score"),
+            "entry_reason": "; ".join(alert.get("reasons", [])),
+            "entry_metrics": alert,
+        }
+
+    def _existing_simulated_symbols(self, trade_date: date, run_id: str) -> set:
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT symbol
+                FROM simulated_recommendation_trades
+                WHERE trade_date = ? AND run_id = ?
+                """,
+                (trade_date.isoformat(), run_id),
+            ).fetchall()
+            return {str(row[0] or "").upper() for row in rows}
+
+    def _risk_reward_for_entry(self, entry_price: float, stop_loss: float, exit_target: float) -> float:
+        if entry_price <= 0 or stop_loss <= 0 or exit_target <= entry_price:
+            return 0.0
+        risk = entry_price - stop_loss
+        reward = exit_target - entry_price
+        return reward / risk if risk > 0 else 0.0
+
+    def _intraday_vwap(self, history: pd.DataFrame) -> float:
+        if history.empty:
+            return 0.0
+        typical = (
+            pd.to_numeric(history["High"], errors="coerce")
+            + pd.to_numeric(history["Low"], errors="coerce")
+            + pd.to_numeric(history["Close"], errors="coerce")
+        ) / 3
+        if "Volume" in history.columns:
+            volume = pd.to_numeric(history["Volume"], errors="coerce").fillna(0)
+        else:
+            volume = pd.Series([0] * len(history), index=history.index)
+        if volume.sum() > 0:
+            return self._safe_float((typical * volume).sum() / volume.sum())
+        return self._safe_float(typical.mean())
+
+    def _intraday_volume_ratio(self, history: pd.DataFrame) -> float:
+        if history.empty or "Volume" not in history.columns:
+            return 0.0
+        volume = pd.to_numeric(history["Volume"], errors="coerce").fillna(0)
+        if len(volume) < 6:
+            return 0.0
+        current = self._safe_float(volume.iloc[-1])
+        baseline = self._safe_float(volume.iloc[:-1].tail(20).median())
+        if baseline <= 0:
+            return 0.0
+        return current / baseline
 
     def _recommendation_payload(self, run_id: str) -> Dict:
         with sqlite3.connect(self.db_path) as conn:
@@ -590,12 +1034,12 @@ def format_simulation_summary_message(summary: Dict, label: str = "EOD") -> str:
     if not trades:
         backfill = summary.get("backfill") or {}
         if backfill.get("error"):
-            lines.append(f"Open-entry backfill failed: {backfill.get('error')}.")
+            lines.append(f"Entry-alert backfill failed: {backfill.get('error')}.")
         elif backfill:
             captured = backfill.get("captured", 0)
             requested = backfill.get("requested", 0)
             errors = backfill.get("errors") or []
-            lines.append(f"Open-entry backfill captured {captured}/{requested} picks.")
+            lines.append(f"Entry-alert backfill captured {captured}/{requested} picks.")
             if errors:
                 lines.append("Backfill errors:")
                 for item in errors[:5]:
@@ -620,7 +1064,86 @@ def format_simulation_summary_message(summary: Dict, label: str = "EOD") -> str:
             )
         )
 
-    lines.append("This is an open-entry simulation snapshot for research only.")
+    lines.append("This is an entry-alert simulation snapshot for research only.")
+    return "\n".join(lines).strip()
+
+
+def format_entry_alert_message(scan: Dict) -> str:
+    alerts = scan.get("alerts", [])
+    trade_date = scan.get("trade_date", "")
+    target_weekly = float(scan.get("target_weekly") or 0)
+    target_monthly = float(scan.get("target_monthly") or 0)
+    alert_summary = " | ".join(
+        f"{alert.get('symbol')} ${alert.get('entry_price', 0):.2f}"
+        for alert in sorted(alerts, key=lambda row: row.get("rank") or 999)
+    )
+    lines = [
+        (
+            f"BUY DIP ALERT - {trade_date}: {alert_summary}"
+            if alert_summary
+            else f"BUY DIP ALERT - {trade_date}: no entry trigger"
+        ),
+        (
+            f"Captured {scan.get('captured', 0)}/{scan.get('requested', 0)} "
+            "top picks that met the intraday dip rules."
+        ),
+        "Mode: alert + simulated entry only; no real order placed.",
+        (
+            f"Target context: ${target_weekly:.0f}/week, ${target_monthly:.0f}/month; "
+            "not guaranteed."
+        ),
+        "",
+    ]
+
+    if not alerts:
+        evaluated = scan.get("evaluated", []) or []
+        if scan.get("error"):
+            lines.append(scan["error"])
+        elif evaluated:
+            lines.append("Closest candidates:")
+            for item in evaluated[:3]:
+                fail = "; ".join(item.get("fail_reasons", [])[:2])
+                lines.append(
+                    (
+                        f"{item.get('symbol')}: score {item.get('entry_score', 0):.1f}, "
+                        f"price ${item.get('entry_price', 0):.2f}"
+                        f"{' - ' + fail if fail else ''}"
+                    )
+                )
+        else:
+            lines.append("No top picks had usable intraday data yet.")
+        return "\n".join(lines).strip()
+
+    for alert in sorted(alerts, key=lambda row: row.get("rank") or 999):
+        metrics = alert.get("entry_metrics") or {}
+        entry_value = float(alert.get("entry_price", 0) or 0) * float(alert.get("quantity", 0) or 0)
+        reasons = "; ".join(metrics.get("reasons", [])[:3] or [alert.get("entry_reason", "")])
+        lines.append(
+            (
+                f"{alert.get('rank')}. {alert.get('symbol')}: "
+                f"buy near ${alert.get('entry_price', 0):.2f} | "
+                f"sim ${entry_value:.2f} x {alert.get('quantity', 0):.4f}"
+            )
+        )
+        lines.append(
+            (
+                f"Target ${alert.get('exit_target', 0):.2f} | "
+                f"stop ${alert.get('stop_loss', 0):.2f} | "
+                f"R/R {metrics.get('risk_reward', 0):.2f}x"
+            )
+        )
+        lines.append(
+            (
+                f"Dip {metrics.get('drop_from_reference_pct', 0):.2f}% vs pick, "
+                f"{metrics.get('drop_from_high_pct', 0):.2f}% from high; "
+                f"bounce {metrics.get('bounce_from_low_pct', 0):.2f}%"
+            )
+        )
+        if reasons:
+            lines.append(f"Why: {reasons}")
+
+    lines.append("")
+    lines.append("Confirm in the app before placing live trades.")
     return "\n".join(lines).strip()
 
 

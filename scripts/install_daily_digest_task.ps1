@@ -27,6 +27,9 @@ function Get-ConfigValue {
         "Config.SIMULATION_OPEN_TIME" = "06:35"
         "Config.SIMULATION_MIDDAY_TIME" = "09:00"
         "Config.SIMULATION_EOD_TIME" = "13:10"
+        "Config.ENTRY_ALERT_START_TIME" = "07:00"
+        "Config.ENTRY_ALERT_END_TIME" = "12:30"
+        "Config.ENTRY_ALERT_SCAN_INTERVAL_MINUTES" = "10"
     }
 
     $EnvName = $Expression -replace "^Config\.", ""
@@ -94,9 +97,11 @@ function Register-DigestTask {
 }
 
 $DigestTime = Get-ConfigValue "Config.TOP_RECOMMENDATIONS_TIME"
-$OpenTime = Get-ConfigValue "Config.SIMULATION_OPEN_TIME"
 $MiddayTime = Get-ConfigValue "Config.SIMULATION_MIDDAY_TIME"
 $EodTime = Get-ConfigValue "Config.SIMULATION_EOD_TIME"
+$EntryAlertStartTime = Get-ConfigValue "Config.ENTRY_ALERT_START_TIME"
+$EntryAlertEndTime = Get-ConfigValue "Config.ENTRY_ALERT_END_TIME"
+$EntryAlertInterval = Get-ConfigValue "Config.ENTRY_ALERT_SCAN_INTERVAL_MINUTES"
 
 Register-DigestTask `
     -TaskName "$($TaskPrefix)DailyDigest" `
@@ -104,11 +109,17 @@ Register-DigestTask `
     -Arguments "--run-once" `
     -Description "Send the trading council WhatsApp digest on market weekdays."
 
+$LegacyOpenTask = "$($TaskPrefix)OpenSimulation"
+if (Get-ScheduledTask -TaskName $LegacyOpenTask -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName $LegacyOpenTask -Confirm:$false
+    Write-Host "Removed legacy scheduled task '$LegacyOpenTask'."
+}
+
 Register-DigestTask `
-    -TaskName "$($TaskPrefix)OpenSimulation" `
-    -RunTime $OpenTime `
-    -Arguments "--capture-open" `
-    -Description "Capture simulated open-entry trades for top recommendations on market weekdays."
+    -TaskName "$($TaskPrefix)EntryAlertMonitor" `
+    -RunTime $EntryAlertStartTime `
+    -Arguments "--monitor-entry-alerts --run-window" `
+    -Description "Scan top recommendations for intraday dip-entry buy alerts every $EntryAlertInterval minutes until $EntryAlertEndTime on market weekdays."
 
 Register-DigestTask `
     -TaskName "$($TaskPrefix)MiddaySimulationSummary" `

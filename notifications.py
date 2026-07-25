@@ -32,14 +32,17 @@ def _format_signed_dollars(value: float) -> str:
 class NotificationService:
     """Thin wrapper around OpenClaw WhatsApp delivery."""
 
-    RECOVERABLE_GATEWAY_ERRORS = (
+    RETRYABLE_NO_DELIVERY_ERRORS = (
         "No active WhatsApp Web listener",
+        "Gateway not reachable",
+        "ECONNREFUSED",
+    )
+    AMBIGUOUS_DELIVERY_ERRORS = (
         "GatewayTransportError",
         "gateway timeout",
         "send timed out",
         "timed out",
-        "Gateway not reachable",
-        "ECONNREFUSED",
+        "gateway closed",
     )
 
     def __init__(self):
@@ -121,7 +124,16 @@ class NotificationService:
         return [self._resolve_openclaw_cli()]
 
     def _is_recoverable_gateway_error(self, output: str) -> bool:
-        return any(marker in output for marker in self.RECOVERABLE_GATEWAY_ERRORS)
+        return self._is_retryable_no_delivery_error(output) or (
+            self.config.OPENCLAW_RETRY_AMBIGUOUS_SENDS
+            and self._is_ambiguous_delivery_error(output)
+        )
+
+    def _is_retryable_no_delivery_error(self, output: str) -> bool:
+        return any(marker in output for marker in self.RETRYABLE_NO_DELIVERY_ERRORS)
+
+    def _is_ambiguous_delivery_error(self, output: str) -> bool:
+        return any(marker in output for marker in self.AMBIGUOUS_DELIVERY_ERRORS)
 
     def _openclaw_process_timeout(self, timeout: int) -> int:
         handshake_ms = max(10000, int(self.config.OPENCLAW_HANDSHAKE_TIMEOUT_MS or 0))
@@ -192,6 +204,19 @@ class NotificationService:
                     return True, result.returncode, ""
                 last_returncode = result.returncode
                 last_output = (result.stderr or result.stdout or "").strip()
+
+            if (
+                attempt < attempts
+                and self._is_ambiguous_delivery_error(last_output)
+                and not self.config.OPENCLAW_RETRY_AMBIGUOUS_SENDS
+            ):
+                logger.warning(
+                    "OpenClaw WhatsApp attempt %s/%s returned ambiguous delivery status; not retrying to avoid duplicate WhatsApp messages: %s",
+                    attempt,
+                    attempts,
+                    last_output,
+                )
+                break
 
             if attempt < attempts and self._is_recoverable_gateway_error(last_output):
                 sleep_seconds = min(8 * attempt, 24)

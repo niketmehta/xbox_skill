@@ -635,6 +635,28 @@ def capture_recommendation_simulation_open():
         app.logger.error(f"Error capturing simulated open trades: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/recommendations/entry-alerts/scan', methods=['POST'])
+def scan_recommendation_entry_alerts():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        data = request.get_json() or {}
+        top_n = data.get('top_n') or None
+        max_alerts = data.get('max_alerts') or None
+        historical = bool(data.get('historical', False))
+        send_whatsapp = bool(data.get('send_whatsapp', False))
+        result = trading_agent.trade_simulator.capture_entry_alerts(
+            top_n=top_n,
+            max_alerts=max_alerts,
+            historical=historical,
+        )
+        if send_whatsapp and result.get('captured', 0) > 0:
+            result = trading_agent.trade_simulator.send_entry_alerts_whatsapp(result)
+        return jsonify(convert_numpy_types(result))
+    except Exception as e:
+        app.logger.error(f"Error scanning entry alerts: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recommendations/simulation/eod')
 def get_recommendation_simulation_eod():
     if not trading_agent:
@@ -717,6 +739,18 @@ def get_config():
             'MONTH_TAKE_PROFIT_PCT': config.MONTH_TAKE_PROFIT_PCT,
             'MAX_DAILY_LOSS': config.MAX_DAILY_LOSS,
             'MAX_POSITIONS': config.MAX_POSITIONS,
+            'AUTO_TRADE_ENABLED': config.AUTO_TRADE_ENABLED,
+            'ENTRY_ALERTS_ENABLED': config.ENTRY_ALERTS_ENABLED,
+            'ENTRY_ALERT_START_TIME': config.ENTRY_ALERT_START_TIME,
+            'ENTRY_ALERT_END_TIME': config.ENTRY_ALERT_END_TIME,
+            'ENTRY_ALERT_SCAN_INTERVAL_MINUTES': config.ENTRY_ALERT_SCAN_INTERVAL_MINUTES,
+            'ENTRY_ALERT_SKIP_OPEN_MINUTES': config.ENTRY_ALERT_SKIP_OPEN_MINUTES,
+            'ENTRY_ALERT_SKIP_CLOSE_MINUTES': config.ENTRY_ALERT_SKIP_CLOSE_MINUTES,
+            'ENTRY_ALERT_MIN_DIP_PCT': config.ENTRY_ALERT_MIN_DIP_PCT,
+            'ENTRY_ALERT_MIN_BOUNCE_PCT': config.ENTRY_ALERT_MIN_BOUNCE_PCT,
+            'ENTRY_ALERT_MIN_RISK_REWARD': config.ENTRY_ALERT_MIN_RISK_REWARD,
+            'PROFIT_TARGET_WEEKLY': config.PROFIT_TARGET_WEEKLY,
+            'PROFIT_TARGET_MONTHLY': config.PROFIT_TARGET_MONTHLY,
             'RSI_OVERSOLD': config.RSI_OVERSOLD,
             'RSI_OVERBOUGHT': config.RSI_OVERBOUGHT,
             'VOLUME_SPIKE_THRESHOLD': config.VOLUME_SPIKE_THRESHOLD
