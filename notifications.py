@@ -37,6 +37,7 @@ class NotificationService:
         "No active WhatsApp Web listener",
         "Gateway not reachable",
         "ECONNREFUSED",
+        "gateway closed (1006",
     )
     AMBIGUOUS_DELIVERY_ERRORS = (
         "GatewayTransportError",
@@ -258,6 +259,7 @@ class NotificationService:
             if (
                 attempt < attempts
                 and self._is_ambiguous_delivery_error(last_output)
+                and not self._is_retryable_no_delivery_error(last_output)
                 and not self.config.OPENCLAW_RETRY_AMBIGUOUS_SENDS
             ):
                 logger.warning(
