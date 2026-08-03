@@ -35,6 +35,8 @@ class NotificationService:
     def __init__(self):
         self.config = Config()
         self._notification_channel = self._normalize_channel(self.config.NOTIFICATION_CHANNEL)
+        if self._notification_channel == "unsupported":
+            self._notification_channel = "email" if self.config.EMAIL_ENABLED else "none"
         self._email_enabled = self.config.EMAIL_ENABLED
         self._email_to = self.config.EMAIL_TO
         self._email_allowed_recipients = set(
@@ -55,9 +57,7 @@ class NotificationService:
             return "email"
         if channel in {"none", "off", "disabled"}:
             return "none"
-        if not channel:
-            return "email" if self.config.EMAIL_ENABLED else "none"
-        return channel
+        return "unsupported"
 
     def set_notification_channel(self, channel: str) -> bool:
         normalized = self._normalize_channel(channel)
