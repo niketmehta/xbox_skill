@@ -218,10 +218,6 @@ class TradeSimulationEngine:
         }
         return scan
 
-    def send_entry_alerts_whatsapp(self, scan: Dict) -> Dict:
-        """Compatibility wrapper for older dashboard/API routes."""
-        return self.send_entry_alerts_notification(scan)
-
     def entry_alert_window_status(self, now: Optional[datetime] = None) -> Dict:
         now = now or datetime.now(self.eastern_tz)
         if now.tzinfo is None:
@@ -358,14 +354,6 @@ class TradeSimulationEngine:
         }
         return summary
 
-    def send_eod_summary_whatsapp(
-        self,
-        trade_date: Optional[date] = None,
-        label: str = "EOD",
-    ) -> Dict:
-        """Compatibility wrapper for older dashboard/API routes."""
-        return self.send_eod_summary_notification(trade_date=trade_date, label=label)
-
     def send_open_capture_notification(self, capture: Dict) -> Dict:
         body = format_open_capture_message(capture)
         subject = f"Simulated open entries - {capture.get('trade_date', '')}".strip()
@@ -378,10 +366,6 @@ class TradeSimulationEngine:
             "error": self.notifications.get_last_error(),
         }
         return capture
-
-    def send_open_capture_whatsapp(self, capture: Dict) -> Dict:
-        """Compatibility wrapper for older dashboard/API routes."""
-        return self.send_open_capture_notification(capture)
 
     def _learn_from_missed_movers(self, summary: Dict) -> Dict:
         trade_date = summary.get("trade_date") or self._today_eastern().isoformat()

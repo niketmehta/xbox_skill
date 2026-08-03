@@ -32,27 +32,9 @@ class Config:
     ]
     EMAIL_SUBJECT_PREFIX = os.getenv('EMAIL_SUBJECT_PREFIX', '[Trading Agent]')
     EMAIL_TIMEOUT_SECONDS = int(os.getenv('EMAIL_TIMEOUT_SECONDS', 30))
-    
-    # OpenClaw WhatsApp delivery
-    OPENCLAW_ENABLED = os.getenv('OPENCLAW_ENABLED', 'false').lower() == 'true'
-    OPENCLAW_CLI = os.getenv('OPENCLAW_CLI', 'openclaw')
-    OPENCLAW_CHANNEL = os.getenv('OPENCLAW_CHANNEL', 'whatsapp')
-    OPENCLAW_ACCOUNT = os.getenv('OPENCLAW_ACCOUNT', '')
-    OPENCLAW_WHATSAPP_TARGET = os.getenv('OPENCLAW_WHATSAPP_TARGET', '')
-    _OPENCLAW_ALLOWED_TARGETS_RAW = os.getenv('OPENCLAW_ALLOWED_TARGETS') or OPENCLAW_WHATSAPP_TARGET
-    OPENCLAW_ALLOWED_TARGETS = [
-        target.strip()
-        for target in _OPENCLAW_ALLOWED_TARGETS_RAW.split(',')
-        if target.strip()
-    ]
-    OPENCLAW_TIMEOUT_SECONDS = int(os.getenv('OPENCLAW_TIMEOUT_SECONDS', 45))
-    OPENCLAW_HANDSHAKE_TIMEOUT_MS = int(os.getenv('OPENCLAW_HANDSHAKE_TIMEOUT_MS', 120000))
-    OPENCLAW_SEND_ATTEMPTS = int(os.getenv('OPENCLAW_SEND_ATTEMPTS', 4))
-    OPENCLAW_AUTO_RESTART = os.getenv('OPENCLAW_AUTO_RESTART', 'true').lower() == 'true'
-    OPENCLAW_RETRY_AMBIGUOUS_SENDS = os.getenv('OPENCLAW_RETRY_AMBIGUOUS_SENDS', 'false').lower() == 'true'
     NOTIFICATION_CHANNEL = os.getenv(
         'NOTIFICATION_CHANNEL',
-        'email' if EMAIL_ENABLED else 'openclaw_whatsapp',
+        'email' if EMAIL_ENABLED else 'none',
     ).lower()
 
     # Live execution is opt-in. The default flow produces alerts and simulations only.
@@ -91,9 +73,8 @@ class Config:
     SIMULATION_EOD_TIME = os.getenv('SIMULATION_EOD_TIME', '13:10')
     SIMULATION_OPEN_NOTIFICATIONS_ENABLED = os.getenv(
         'SIMULATION_OPEN_NOTIFICATIONS_ENABLED',
-        os.getenv('SIMULATION_OPEN_WHATSAPP_ENABLED', 'true'),
+        'true',
     ).lower() == 'true'
-    SIMULATION_OPEN_WHATSAPP_ENABLED = SIMULATION_OPEN_NOTIFICATIONS_ENABLED
     SIMULATION_BACKFILL_ON_SUMMARY = os.getenv('SIMULATION_BACKFILL_ON_SUMMARY', 'true').lower() == 'true'
 
     # Intraday dip-entry alerts. Times are scheduler-local; market filters use Eastern market hours.
@@ -112,9 +93,8 @@ class Config:
     ENTRY_ALERT_MAX_ALERTS_PER_SCAN = int(os.getenv('ENTRY_ALERT_MAX_ALERTS_PER_SCAN', 2))
     ENTRY_ALERT_NOTIFICATIONS_ENABLED = os.getenv(
         'ENTRY_ALERT_NOTIFICATIONS_ENABLED',
-        os.getenv('ENTRY_ALERT_WHATSAPP_ENABLED', 'true'),
+        'true',
     ).lower() == 'true'
-    ENTRY_ALERT_WHATSAPP_ENABLED = ENTRY_ALERT_NOTIFICATIONS_ENABLED
     PROFIT_TARGET_WEEKLY = float(os.getenv('PROFIT_TARGET_WEEKLY', 500))
     PROFIT_TARGET_MONTHLY = float(os.getenv('PROFIT_TARGET_MONTHLY', 2000))
     
