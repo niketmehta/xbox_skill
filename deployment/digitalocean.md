@@ -147,5 +147,5 @@ Back up the SQLite database from Windows:
 scp -i "$env:USERPROFILE\.ssh\do_trading_agent" trader@<DROPLET_IP>:/home/trader/xbox_skill/trading_data.db .\trading_data.backup.db
 ```
 
-Email notifications should be tested from the Droplet after setting the SMTP
-credentials in `/home/trader/xbox_skill/.env`.
+OpenClaw/WhatsApp should be enabled only after the dashboard and scheduler are
+stable on the Droplet.

@@ -103,6 +103,19 @@ EMAIL_ALLOWED_RECIPIENTS=your_email@example.com
 EMAIL_SUBJECT_PREFIX=[Trading Agent]
 EMAIL_TIMEOUT_SECONDS=30
 
+# Legacy OpenClaw WhatsApp delivery
+OPENCLAW_ENABLED=false
+OPENCLAW_CLI=openclaw
+OPENCLAW_CHANNEL=whatsapp
+OPENCLAW_ACCOUNT=
+OPENCLAW_WHATSAPP_TARGET=+1234567890
+OPENCLAW_ALLOWED_TARGETS=+1234567890
+OPENCLAW_TIMEOUT_SECONDS=45
+OPENCLAW_HANDSHAKE_TIMEOUT_MS=120000
+OPENCLAW_SEND_ATTEMPTS=4
+OPENCLAW_AUTO_RESTART=true
+OPENCLAW_RETRY_AMBIGUOUS_SENDS=false
+
 # Optional scheduled notification digest
 TOP_RECOMMENDATIONS_ENABLED=false
 TOP_RECOMMENDATIONS_TIME=05:35
@@ -154,8 +167,8 @@ PROFIT_TARGET_MONTHLY=2000
 
 ### Trading Council Notifications
 - `GET /api/recommendations/top5?horizon=WEEK&limit=5` runs the multi-agent council and returns challenged BUY candidates with buy zone, exit target, stop loss, risk/reward, objections, and an email-ready digest.
-- `POST /api/recommendations/top5/send-notification` regenerates the council digest and sends it through SMTP email. Use `NOTIFICATION_CHANNEL=email` with `EMAIL_ENABLED=true` for headless droplet delivery.
-- Email sends are restricted to `EMAIL_ALLOWED_RECIPIENTS` when configured.
+- `POST /api/recommendations/top5/send-notification` regenerates the council digest and sends it through the configured channel. Use `NOTIFICATION_CHANNEL=email` with `EMAIL_ENABLED=true` for headless droplet delivery.
+- Email sends are restricted to `EMAIL_ALLOWED_RECIPIENTS` when configured. Legacy OpenClaw WhatsApp routes remain temporarily for migration but should stay disabled while email is primary.
 - The council uses momentum, breakout, mean-reversion, volume, fundamentals, relative strength, macro risk, skeptic, and arbiter agents. Picks are saved to `trading_data.db` for audit.
 - Scheduled digests use a smart universe by default: current movers, momentum/breakout screens, the smart watchlist, default liquid names, and currently held positions.
 - The smart universe now uses an internal broad sector-discovery map plus live movers/screens, so emerging themes such as storage, memory, software, health care, energy, industrials, financials, and consumer names are evaluated without maintaining a user focus list.

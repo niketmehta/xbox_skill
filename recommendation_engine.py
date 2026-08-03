@@ -827,7 +827,7 @@ class TopRecommendationEngine:
 
 
 def format_top_recommendations_message(result: Dict) -> str:
-    """Format a compact email-friendly digest."""
+    """Format a compact WhatsApp-friendly digest."""
     generated_at = result.get("generated_at", "")
     horizon = result.get("horizon", "WEEK")
     picks = result.get("recommendations", [])

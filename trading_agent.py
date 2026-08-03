@@ -687,6 +687,21 @@ class TradingAgent:
         }
         return result
 
+    def send_top_recommendations_whatsapp(
+        self,
+        horizon: str = 'WEEK',
+        limit: int = 5,
+        universe_size: int = 50,
+        target: Optional[str] = None,
+    ) -> Dict:
+        """Compatibility wrapper for older dashboard/API routes."""
+        return self.send_top_recommendations_notification(
+            horizon=horizon,
+            limit=limit,
+            universe_size=universe_size,
+            target=target,
+        )
+
 
 def main():
     agent = TradingAgent()
