@@ -11,6 +11,27 @@ class Config:
     ALPACA_BASE_URL = os.getenv('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
     ALPACA_DATA_FEED = os.getenv('ALPACA_DATA_FEED', 'iex')
     STOOQ_API_KEY = os.getenv('STOOQ_API_KEY', '')
+
+    # Email delivery. This is the preferred notification channel for headless deployments.
+    EMAIL_ENABLED = os.getenv('EMAIL_ENABLED', 'false').lower() == 'true'
+    EMAIL_SMTP_HOST = os.getenv('EMAIL_SMTP_HOST', '')
+    EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', 'false').lower() == 'true'
+    EMAIL_SMTP_PORT = int(
+        os.getenv('EMAIL_SMTP_PORT', '465' if EMAIL_USE_SSL else '587')
+    )
+    EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'true').lower() == 'true'
+    EMAIL_SMTP_USERNAME = os.getenv('EMAIL_SMTP_USERNAME', '')
+    EMAIL_SMTP_PASSWORD = os.getenv('EMAIL_SMTP_PASSWORD', '')
+    EMAIL_FROM = os.getenv('EMAIL_FROM', EMAIL_SMTP_USERNAME)
+    EMAIL_TO = os.getenv('EMAIL_TO', '')
+    _EMAIL_ALLOWED_RECIPIENTS_RAW = os.getenv('EMAIL_ALLOWED_RECIPIENTS') or EMAIL_TO
+    EMAIL_ALLOWED_RECIPIENTS = [
+        recipient.strip()
+        for recipient in _EMAIL_ALLOWED_RECIPIENTS_RAW.replace(';', ',').split(',')
+        if recipient.strip()
+    ]
+    EMAIL_SUBJECT_PREFIX = os.getenv('EMAIL_SUBJECT_PREFIX', '[Trading Agent]')
+    EMAIL_TIMEOUT_SECONDS = int(os.getenv('EMAIL_TIMEOUT_SECONDS', 30))
     
     # OpenClaw WhatsApp delivery
     OPENCLAW_ENABLED = os.getenv('OPENCLAW_ENABLED', 'false').lower() == 'true'
@@ -29,6 +50,10 @@ class Config:
     OPENCLAW_SEND_ATTEMPTS = int(os.getenv('OPENCLAW_SEND_ATTEMPTS', 4))
     OPENCLAW_AUTO_RESTART = os.getenv('OPENCLAW_AUTO_RESTART', 'true').lower() == 'true'
     OPENCLAW_RETRY_AMBIGUOUS_SENDS = os.getenv('OPENCLAW_RETRY_AMBIGUOUS_SENDS', 'false').lower() == 'true'
+    NOTIFICATION_CHANNEL = os.getenv(
+        'NOTIFICATION_CHANNEL',
+        'email' if EMAIL_ENABLED else 'openclaw_whatsapp',
+    ).lower()
 
     # Live execution is opt-in. The default flow produces alerts and simulations only.
     AUTO_TRADE_ENABLED = os.getenv('AUTO_TRADE_ENABLED', 'false').lower() == 'true'
@@ -64,7 +89,11 @@ class Config:
     SIMULATION_OPEN_TIME = os.getenv('SIMULATION_OPEN_TIME', '06:35')
     SIMULATION_MIDDAY_TIME = os.getenv('SIMULATION_MIDDAY_TIME', '09:00')
     SIMULATION_EOD_TIME = os.getenv('SIMULATION_EOD_TIME', '13:10')
-    SIMULATION_OPEN_WHATSAPP_ENABLED = os.getenv('SIMULATION_OPEN_WHATSAPP_ENABLED', 'true').lower() == 'true'
+    SIMULATION_OPEN_NOTIFICATIONS_ENABLED = os.getenv(
+        'SIMULATION_OPEN_NOTIFICATIONS_ENABLED',
+        os.getenv('SIMULATION_OPEN_WHATSAPP_ENABLED', 'true'),
+    ).lower() == 'true'
+    SIMULATION_OPEN_WHATSAPP_ENABLED = SIMULATION_OPEN_NOTIFICATIONS_ENABLED
     SIMULATION_BACKFILL_ON_SUMMARY = os.getenv('SIMULATION_BACKFILL_ON_SUMMARY', 'true').lower() == 'true'
 
     # Intraday dip-entry alerts. Times are scheduler-local; market filters use Eastern market hours.
@@ -81,7 +110,11 @@ class Config:
     ENTRY_ALERT_MIN_RISK_REWARD = float(os.getenv('ENTRY_ALERT_MIN_RISK_REWARD', 1.40))
     ENTRY_ALERT_MIN_TARGET_UPSIDE_PCT = float(os.getenv('ENTRY_ALERT_MIN_TARGET_UPSIDE_PCT', 1.0))
     ENTRY_ALERT_MAX_ALERTS_PER_SCAN = int(os.getenv('ENTRY_ALERT_MAX_ALERTS_PER_SCAN', 2))
-    ENTRY_ALERT_WHATSAPP_ENABLED = os.getenv('ENTRY_ALERT_WHATSAPP_ENABLED', 'true').lower() == 'true'
+    ENTRY_ALERT_NOTIFICATIONS_ENABLED = os.getenv(
+        'ENTRY_ALERT_NOTIFICATIONS_ENABLED',
+        os.getenv('ENTRY_ALERT_WHATSAPP_ENABLED', 'true'),
+    ).lower() == 'true'
+    ENTRY_ALERT_WHATSAPP_ENABLED = ENTRY_ALERT_NOTIFICATIONS_ENABLED
     PROFIT_TARGET_WEEKLY = float(os.getenv('PROFIT_TARGET_WEEKLY', 500))
     PROFIT_TARGET_MONTHLY = float(os.getenv('PROFIT_TARGET_MONTHLY', 2000))
     

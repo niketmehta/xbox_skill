@@ -589,8 +589,9 @@ def get_top_recommendations():
         app.logger.error(f"Error getting top recommendations: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/recommendations/top5/send-notification', methods=['POST'])
 @app.route('/api/recommendations/top5/send-whatsapp', methods=['POST'])
-def send_top_recommendations_whatsapp():
+def send_top_recommendations_notification():
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
     try:
@@ -603,7 +604,7 @@ def send_top_recommendations_whatsapp():
         universe_size = max(limit, min(int(data.get('universe_size') or default_universe_size), 120))
         target = data.get('target') or None
 
-        result = trading_agent.send_top_recommendations_whatsapp(
+        result = trading_agent.send_top_recommendations_notification(
             horizon=horizon,
             limit=limit,
             universe_size=universe_size,
@@ -614,7 +615,7 @@ def send_top_recommendations_whatsapp():
             return jsonify(result)
         detail = trading_agent.notifications.get_last_error()
         return jsonify({
-            'error': 'Failed to send OpenClaw WhatsApp message. Check OpenClaw config.',
+            'error': 'Failed to send notification. Check notification config.',
             'detail': detail,
             **result
         }), 400
@@ -644,14 +645,16 @@ def scan_recommendation_entry_alerts():
         top_n = data.get('top_n') or None
         max_alerts = data.get('max_alerts') or None
         historical = bool(data.get('historical', False))
-        send_whatsapp = bool(data.get('send_whatsapp', False))
+        send_notification = bool(
+            data.get('send_notification', data.get('send_whatsapp', False))
+        )
         result = trading_agent.trade_simulator.capture_entry_alerts(
             top_n=top_n,
             max_alerts=max_alerts,
             historical=historical,
         )
-        if send_whatsapp and result.get('captured', 0) > 0:
-            result = trading_agent.trade_simulator.send_entry_alerts_whatsapp(result)
+        if send_notification and result.get('captured', 0) > 0:
+            result = trading_agent.trade_simulator.send_entry_alerts_notification(result)
         return jsonify(convert_numpy_types(result))
     except Exception as e:
         app.logger.error(f"Error scanning entry alerts: {e}")
@@ -668,17 +671,18 @@ def get_recommendation_simulation_eod():
         app.logger.error(f"Error getting simulated EOD summary: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/recommendations/simulation/eod/send-notification', methods=['POST'])
 @app.route('/api/recommendations/simulation/eod/send-whatsapp', methods=['POST'])
-def send_recommendation_simulation_eod_whatsapp():
+def send_recommendation_simulation_eod_notification():
     if not trading_agent:
         return jsonify({'error': 'Trading agent not initialized'}), 500
     try:
-        result = trading_agent.trade_simulator.send_eod_summary_whatsapp()
+        result = trading_agent.trade_simulator.send_eod_summary_notification()
         result = convert_numpy_types(result)
         if result.get('delivery', {}).get('sent'):
             return jsonify(result)
         return jsonify({
-            'error': 'Failed to send simulated EOD WhatsApp summary.',
+            'error': 'Failed to send simulated EOD notification summary.',
             **result
         }), 400
     except Exception as e:
@@ -867,6 +871,10 @@ def get_notification_config():
         ns = trading_agent.notifications
         return jsonify({
             'enabled': ns.is_enabled(),
+            'channel': ns.get_delivery_channel(),
+            'email_enabled': ns.is_email_enabled(),
+            'email_to': ns.get_email_target(),
+            'email_allowed_recipients': ns.get_email_allowed_recipients(),
             'openclaw_enabled': ns.is_openclaw_enabled(),
             'openclaw_target': ns.get_openclaw_target(),
             'openclaw_allowed_targets': ns.get_openclaw_allowed_targets()
@@ -884,6 +892,20 @@ def update_notification_config():
         
         if 'enabled' in data:
             ns.enable(data['enabled'])
+        if 'channel' in data:
+            if not ns.set_notification_channel(data['channel']):
+                return jsonify({
+                    'error': 'Unsupported notification channel.',
+                    'detail': ns.get_last_error()
+                }), 400
+        if 'email_enabled' in data:
+            ns.enable_email(data['email_enabled'])
+        if 'email_to' in data:
+            if not ns.set_email_target(data['email_to']):
+                return jsonify({
+                    'error': 'Unsafe or invalid email recipient.',
+                    'detail': ns.get_last_error()
+                }), 400
         if 'openclaw_enabled' in data:
             ns.enable_openclaw(data['openclaw_enabled'])
         if 'openclaw_target' in data:
@@ -896,6 +918,10 @@ def update_notification_config():
         return jsonify({
             'message': 'Notification settings updated',
             'enabled': ns.is_enabled(),
+            'channel': ns.get_delivery_channel(),
+            'email_enabled': ns.is_email_enabled(),
+            'email_to': ns.get_email_target(),
+            'email_allowed_recipients': ns.get_email_allowed_recipients(),
             'openclaw_enabled': ns.is_openclaw_enabled(),
             'openclaw_target': ns.get_openclaw_target(),
             'openclaw_allowed_targets': ns.get_openclaw_allowed_targets()
@@ -904,6 +930,40 @@ def update_notification_config():
         return jsonify({'error': str(e)}), 500
 
 # ── Error handlers ──────────────────────────────────────────────
+
+@app.route('/api/notifications/test', methods=['POST'])
+def test_notification():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        data = request.get_json() or {}
+        target = data.get('target') or data.get('email_to') or None
+        success = trading_agent.notifications.send_test(target=target)
+        if success:
+            return jsonify({'message': 'Test notification sent successfully'})
+        return jsonify({
+            'error': 'Failed to send notification. Check notification configuration.',
+            'detail': trading_agent.notifications.get_last_error()
+        }), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/notifications/test-email', methods=['POST'])
+def test_email_notification():
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        data = request.get_json() or {}
+        target = data.get('target') or data.get('email_to') or None
+        success = trading_agent.notifications.send_email_test(target=target)
+        if success:
+            return jsonify({'message': 'Test email sent successfully'})
+        return jsonify({
+            'error': 'Failed to send email. Check SMTP configuration.',
+            'detail': trading_agent.notifications.get_last_error()
+        }), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/notifications/test-whatsapp', methods=['POST'])
 def test_openclaw_whatsapp():

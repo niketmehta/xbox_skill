@@ -227,7 +227,7 @@
             <h1 class="title">Trading Agent</h1>
             <span class="mode-badge">Swing + Position</span>
         </div>
-        <p class="subtitle">6-signal analysis &middot; ATR-based risk management &middot; VIX regime filtering &middot; WhatsApp alerts</p>
+        <p class="subtitle">6-signal analysis &middot; ATR-based risk management &middot; VIX regime filtering &middot; email alerts</p>
         <div class="controls">
             <button class="btn btn-start" onclick="startAgent()">&#9654; Start Agent</button>
             <button class="btn btn-stop" onclick="stopAgent()">&#9632; Stop Agent</button>
@@ -345,7 +345,7 @@
                 <option value="WEEK" selected>1 Week</option>
                 <option value="MONTH">1 Month</option>
             </select>
-            <button class="btn" style="background:#22c55e;padding:6px 14px;font-size:.9em;" onclick="sendTopRecommendations()">Send WhatsApp</button>
+            <button class="btn" style="background:#22c55e;padding:6px 14px;font-size:.9em;" onclick="sendTopRecommendations()">Send Email</button>
             <button class="btn" style="background:#0ea5e9;padding:6px 14px;font-size:.9em;" onclick="scanEntryAlerts()">Scan Dip Alerts</button>
             <span id="top-rec-status" style="font-size:.85em;color:#6b7280;"></span>
         </div>
@@ -363,17 +363,17 @@
 
     <!-- Notification Settings -->
     <div class="table-container" style="margin-top:20px;">
-        <div class="card-header"><span class="card-header-icon">&#128241;</span> WhatsApp Notifications</div>
+        <div class="card-header"><span class="card-header-icon">&#9993;</span> Email Notifications</div>
         <div class="notif-panel">
             <div class="notif-row">
-                <input type="text" class="notif-input" id="openclaw-target" placeholder="WhatsApp target (e.g. +1234567890)">
+                <input type="email" class="notif-input" id="email-target" placeholder="Email recipient">
                 <button class="btn" style="background:#6366f1;padding:6px 14px;font-size:.9em;" onclick="saveNotifConfig()">Save</button>
-                <button class="btn" style="background:#22c55e;padding:6px 14px;font-size:.9em;" onclick="testOpenClawWhatsApp()">Test WhatsApp</button>
+                <button class="btn" style="background:#22c55e;padding:6px 14px;font-size:.9em;" onclick="testEmailNotification()">Test Email</button>
             </div>
             <div class="notif-row">
                 <label style="display:flex;align-items:center;gap:5px;">
-                    <input type="checkbox" id="openclaw-enabled">
-                    <span>Enable OpenClaw WhatsApp</span>
+                    <input type="checkbox" id="email-enabled">
+                    <span>Enable email notifications</span>
                 </label>
             </div>
             <div id="notif-status" style="font-size:.85em;color:#6b7280;margin-top:6px;"></div>
@@ -1068,11 +1068,11 @@ async function refreshTopRecommendations(force = false) {
 
 async function sendTopRecommendations() {
     const horizon = document.getElementById('top-horizon-select').value;
-    const target = document.getElementById('openclaw-target').value.trim();
+    const target = document.getElementById('email-target').value.trim();
     const status = document.getElementById('top-rec-status');
-    status.textContent = 'Sending via OpenClaw...';
+    status.textContent = 'Sending email...';
     try {
-        const r = await fetch('/api/recommendations/top5/send-whatsapp', {
+        const r = await fetch('/api/recommendations/top5/send-notification', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({horizon, limit:5, universe_size:50, target})
@@ -1083,8 +1083,8 @@ async function sendTopRecommendations() {
             alert('Error: ' + d.error);
             status.textContent = 'Send failed';
         } else {
-            alert('OpenClaw WhatsApp sent');
-            status.textContent = 'WhatsApp sent';
+            alert('Email sent');
+            status.textContent = 'Email sent';
         }
     } catch (e) {
         alert('Error: '+e.message);
@@ -1099,7 +1099,7 @@ async function scanEntryAlerts() {
         const r = await fetch('/api/recommendations/entry-alerts/scan', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({top_n:5, max_alerts:2, send_whatsapp:true})
+            body:JSON.stringify({top_n:5, max_alerts:2, send_notification:true})
         });
         const d = await r.json();
         if (d.error) {
@@ -1111,7 +1111,7 @@ async function scanEntryAlerts() {
         const requested = d.requested || 0;
         status.textContent = captured ? `Dip alert sent (${captured}/${requested})` : `No dip triggers (${requested} checked)`;
         if (d.delivery && d.delivery.sent === false) {
-            alert('Dip found, but WhatsApp failed: ' + (d.delivery.error || 'unknown error'));
+            alert('Dip found, but notification failed: ' + (d.delivery.error || 'unknown error'));
         }
     } catch (e) {
         alert('Error: '+e.message);
@@ -1124,17 +1124,17 @@ async function loadNotifConfig() {
         const r = await fetch('/api/notifications/config');
         const d = await r.json();
         if (!d.error) {
-            document.getElementById('openclaw-enabled').checked = !!d.openclaw_enabled;
-            document.getElementById('openclaw-target').value = d.openclaw_target || '';
-            document.getElementById('notif-status').textContent = d.openclaw_enabled ? 'OpenClaw WhatsApp ON' : 'OpenClaw WhatsApp OFF';
+            document.getElementById('email-enabled').checked = !!d.email_enabled;
+            document.getElementById('email-target').value = d.email_to || '';
+            document.getElementById('notif-status').textContent = d.email_enabled ? 'Email notifications ON' : 'Email notifications OFF';
         }
     } catch (e) { console.error(e); }
 }
 async function saveNotifConfig() {
-    const openclawEnabled = document.getElementById('openclaw-enabled').checked;
-    const openclawTarget = document.getElementById('openclaw-target').value.trim();
+    const emailEnabled = document.getElementById('email-enabled').checked;
+    const emailTo = document.getElementById('email-target').value.trim();
     try {
-        const r = await fetch('/api/notifications/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({openclaw_enabled:openclawEnabled, openclaw_target:openclawTarget})});
+        const r = await fetch('/api/notifications/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({channel:'email', email_enabled:emailEnabled, email_to:emailTo})});
         const d = await r.json();
         if (d.error) { alert('Error: '+d.error); }
         else { document.getElementById('notif-status').textContent = d.message; }
@@ -1142,12 +1142,12 @@ async function saveNotifConfig() {
 }
 
 // ── Quick Buy / Sell ───────────────────────────────────────
-async function testOpenClawWhatsApp() {
-    const target = document.getElementById('openclaw-target').value.trim();
+async function testEmailNotification() {
+    const target = document.getElementById('email-target').value.trim();
     try {
-        const r = await fetch('/api/notifications/test-whatsapp', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({target})});
+        const r = await fetch('/api/notifications/test-email', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({target})});
         const d = await r.json();
-        alert(d.message || d.error);
+        alert(d.message || d.detail || d.error);
     } catch (e) { alert('Error: '+e.message); }
 }
 

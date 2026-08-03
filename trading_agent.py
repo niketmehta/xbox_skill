@@ -26,7 +26,7 @@ class TradingAgent:
     """
     Main trading agent that orchestrates multi-timeframe market analysis
     (WEEK and MONTH horizons), strategy execution, risk management,
-    and WhatsApp notifications.
+    and notifications.
     """
 
     def __init__(self):
@@ -430,7 +430,7 @@ class TradingAgent:
 
         horizon = self.config.TOP_RECOMMENDATIONS_HORIZON
         self.logger.info("Sending scheduled trading council digest [%s]", horizon)
-        result = self.send_top_recommendations_whatsapp(
+        result = self.send_top_recommendations_notification(
             horizon=horizon,
             limit=5,
             universe_size=self.config.TOP_RECOMMENDATIONS_UNIVERSE_SIZE,
@@ -479,13 +479,13 @@ class TradingAgent:
             self.logger.warning("Entry-alert scan errors: %s", result.get("errors"))
 
         if (
-            self.config.ENTRY_ALERT_WHATSAPP_ENABLED
+            self.config.ENTRY_ALERT_NOTIFICATIONS_ENABLED
             and result.get("captured", 0) > 0
         ):
-            result = self.trade_simulator.send_entry_alerts_whatsapp(result)
+            result = self.trade_simulator.send_entry_alerts_notification(result)
             if not result.get("delivery", {}).get("sent"):
                 self.logger.warning(
-                    "Entry-alert WhatsApp was not delivered: %s",
+                    "Entry-alert notification was not delivered: %s",
                     result.get("delivery", {}).get("error"),
                 )
 
@@ -494,7 +494,7 @@ class TradingAgent:
             return
 
         self.logger.info("Sending simulated end-of-day P&L summary")
-        result = self.trade_simulator.send_eod_summary_whatsapp(label="EOD")
+        result = self.trade_simulator.send_eod_summary_notification(label="EOD")
         if not result.get("delivery", {}).get("sent"):
             self.logger.warning(
                 "Simulated end-of-day P&L summary was not delivered: %s",
@@ -506,7 +506,7 @@ class TradingAgent:
             return
 
         self.logger.info("Sending simulated midday P&L summary")
-        result = self.trade_simulator.send_eod_summary_whatsapp(label="MIDDAY")
+        result = self.trade_simulator.send_eod_summary_notification(label="MIDDAY")
         if not result.get("delivery", {}).get("sent"):
             self.logger.warning(
                 "Simulated midday P&L summary was not delivered: %s",
@@ -662,6 +662,31 @@ class TradingAgent:
             universe_size=len(symbols),
         )
 
+    def send_top_recommendations_notification(
+        self,
+        horizon: str = 'WEEK',
+        limit: int = 5,
+        universe_size: int = 50,
+        target: Optional[str] = None,
+    ) -> Dict:
+        """Generate top recommendations and deliver the digest."""
+        result = self.get_top_recommendations(
+            horizon=horizon,
+            limit=limit,
+            universe_size=universe_size,
+        )
+        body = format_top_recommendations_message(result)
+        subject = f"Trading council picks - {horizon.upper()}"
+        sent = self.notifications.send_notification(body, subject=subject, target=target)
+        result['delivery'] = {
+            'channel': self.notifications.get_delivery_channel(),
+            'sent': sent,
+            'target': self.notifications.get_delivery_target(target),
+            'message': body,
+            'error': self.notifications.get_last_error(),
+        }
+        return result
+
     def send_top_recommendations_whatsapp(
         self,
         horizon: str = 'WEEK',
@@ -669,22 +694,13 @@ class TradingAgent:
         universe_size: int = 50,
         target: Optional[str] = None,
     ) -> Dict:
-        """Generate top recommendations and deliver the digest via OpenClaw WhatsApp."""
-        result = self.get_top_recommendations(
+        """Compatibility wrapper for older dashboard/API routes."""
+        return self.send_top_recommendations_notification(
             horizon=horizon,
             limit=limit,
             universe_size=universe_size,
+            target=target,
         )
-        body = format_top_recommendations_message(result)
-        sent = self.notifications.send_openclaw_whatsapp(body, target=target)
-        result['delivery'] = {
-            'channel': 'openclaw_whatsapp',
-            'sent': sent,
-            'target': target or self.notifications.get_openclaw_target(),
-            'message': body,
-            'error': self.notifications.get_last_error(),
-        }
-        return result
 
 
 def main():
