@@ -9,7 +9,7 @@ An automated day trading system that analyzes real-time market data, recommends 
 - **Automatic Stock Picking**: Multi-agent council for Top N recommendations
 - **Multi-Strategy Analysis**: Momentum, mean reversion, breakout, and volume-based strategies
 - **Automatic Risk Management**: Stop-loss and take-profit mechanisms
-- **Email Digests**: SMTP notifications for picks, intraday dip-entry alerts, and EOD P/L
+- **WhatsApp Digests**: OpenClaw messages for picks, intraday dip-entry alerts, and EOD P/L
 - **Portfolio Management**: Position tracking, P&L calculation, and performance metrics
 
 ### Web Dashboard
@@ -88,22 +88,7 @@ TAKE_PROFIT_PERCENTAGE=0.05    # 5% take profit
 MAX_DAILY_LOSS=500            # Maximum daily loss
 MAX_POSITIONS=5               # Maximum concurrent positions
 
-# Optional: email delivery
-NOTIFICATION_CHANNEL=email
-EMAIL_ENABLED=false
-EMAIL_SMTP_HOST=smtp.gmail.com
-EMAIL_SMTP_PORT=587
-EMAIL_USE_TLS=true
-EMAIL_USE_SSL=false
-EMAIL_SMTP_USERNAME=your_email@example.com
-EMAIL_SMTP_PASSWORD=your_app_password_here
-EMAIL_FROM=your_email@example.com
-EMAIL_TO=your_email@example.com
-EMAIL_ALLOWED_RECIPIENTS=your_email@example.com
-EMAIL_SUBJECT_PREFIX=[Trading Agent]
-EMAIL_TIMEOUT_SECONDS=30
-
-# Legacy OpenClaw WhatsApp delivery
+# Optional: OpenClaw WhatsApp delivery
 OPENCLAW_ENABLED=false
 OPENCLAW_CLI=openclaw
 OPENCLAW_CHANNEL=whatsapp
@@ -116,7 +101,7 @@ OPENCLAW_SEND_ATTEMPTS=4
 OPENCLAW_AUTO_RESTART=true
 OPENCLAW_RETRY_AMBIGUOUS_SENDS=false
 
-# Optional scheduled notification digest
+# Optional scheduled WhatsApp digest
 TOP_RECOMMENDATIONS_ENABLED=false
 TOP_RECOMMENDATIONS_TIME=05:35
 TOP_RECOMMENDATIONS_HORIZON=WEEK
@@ -145,7 +130,7 @@ SIMULATION_NOTIONAL_PER_PICK=1000
 SIMULATION_OPEN_TIME=06:35
 SIMULATION_MIDDAY_TIME=09:00
 SIMULATION_EOD_TIME=13:10
-SIMULATION_OPEN_NOTIFICATIONS_ENABLED=true
+SIMULATION_OPEN_WHATSAPP_ENABLED=true
 SIMULATION_BACKFILL_ON_SUMMARY=true
 ENTRY_ALERTS_ENABLED=true
 ENTRY_ALERT_START_TIME=07:00
@@ -160,15 +145,15 @@ ENTRY_ALERT_STOP_BUFFER_PCT=0.35
 ENTRY_ALERT_MIN_RISK_REWARD=1.40
 ENTRY_ALERT_MIN_TARGET_UPSIDE_PCT=1.0
 ENTRY_ALERT_MAX_ALERTS_PER_SCAN=2
-ENTRY_ALERT_NOTIFICATIONS_ENABLED=true
+ENTRY_ALERT_WHATSAPP_ENABLED=true
 PROFIT_TARGET_WEEKLY=500
 PROFIT_TARGET_MONTHLY=2000
 ```
 
-### Trading Council Notifications
-- `GET /api/recommendations/top5?horizon=WEEK&limit=5` runs the multi-agent council and returns challenged BUY candidates with buy zone, exit target, stop loss, risk/reward, objections, and an email-ready digest.
-- `POST /api/recommendations/top5/send-notification` regenerates the council digest and sends it through the configured channel. Use `NOTIFICATION_CHANNEL=email` with `EMAIL_ENABLED=true` for headless droplet delivery.
-- Email sends are restricted to `EMAIL_ALLOWED_RECIPIENTS` when configured. Legacy OpenClaw WhatsApp routes remain temporarily for migration but should stay disabled while email is primary.
+### OpenClaw Trading Council
+- `GET /api/recommendations/top5?horizon=WEEK&limit=5` runs the multi-agent council and returns challenged BUY candidates with buy zone, exit target, stop loss, risk/reward, objections, and a WhatsApp-ready digest.
+- `POST /api/recommendations/top5/send-whatsapp` regenerates the council digest and sends it through OpenClaw WhatsApp when `OPENCLAW_ENABLED=true`.
+- OpenClaw sends are restricted to `OPENCLAW_ALLOWED_TARGETS`; contact-list, broadcast, group-ish, multi-recipient, or unapproved targets are blocked before OpenClaw is invoked.
 - The council uses momentum, breakout, mean-reversion, volume, fundamentals, relative strength, macro risk, skeptic, and arbiter agents. Picks are saved to `trading_data.db` for audit.
 - Scheduled digests use a smart universe by default: current movers, momentum/breakout screens, the smart watchlist, default liquid names, and currently held positions.
 - The smart universe now uses an internal broad sector-discovery map plus live movers/screens, so emerging themes such as storage, memory, software, health care, energy, industrials, financials, and consumer names are evaluated without maintaining a user focus list.
@@ -180,7 +165,7 @@ PROFIT_TARGET_MONTHLY=2000
 - Recommendation payloads save the screened universe and a lightweight candidate snapshot for later missed-pick audits.
 - Digests include supplemental "held momentum review" and "intraday breakout watch" sections so strong existing positions or fast movers can surface even when the conservative council does not mark them as fresh top BUY picks.
 - Scheduled digest/simulation jobs run on weekdays and also check the Alpaca US equities calendar at runtime, so weekends and market holidays are skipped cleanly.
-- Intraday entry alerts scan after the opening volatility window and look for a dip, bounce, usable stop distance, and improved risk/reward before sending an email buy alert. Alerts are simulated entries only; live orders still require manual approval unless `AUTO_TRADE_ENABLED=true`.
+- Intraday entry alerts scan after the opening volatility window and look for a dip, bounce, usable stop distance, and improved risk/reward before sending a WhatsApp buy alert. Alerts are simulated entries only; live orders still require manual approval unless `AUTO_TRADE_ENABLED=true`.
 - MIDDAY/EOD simulation summaries backfill entry-alert rows from the latest recommendation run when the monitor was missed, and include all captured same-day recommendation runs so earlier picks are not hidden.
 - Backfill or inspect learning with `py -3 scripts\rebuild_council_memory.py` and `py -3 scripts\analyze_recommendation_history.py`.
 

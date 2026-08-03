@@ -205,22 +205,17 @@ class TradeSimulationEngine:
             "target_monthly": self.config.PROFIT_TARGET_MONTHLY,
         }
 
-    def send_entry_alerts_notification(self, scan: Dict) -> Dict:
+    def send_entry_alerts_whatsapp(self, scan: Dict) -> Dict:
         body = format_entry_alert_message(scan)
-        subject = f"Buy dip alert - {scan.get('trade_date', '')}".strip()
-        sent = self.notifications.send_notification(body, subject=subject)
+        sent = self.notifications.send_openclaw_whatsapp(body)
         scan["delivery"] = {
-            "channel": self.notifications.get_delivery_channel(),
+            "channel": "openclaw_whatsapp",
             "sent": sent,
-            "target": self.notifications.get_delivery_target(),
+            "target": self.notifications.get_openclaw_target(),
             "message": body,
             "error": self.notifications.get_last_error(),
         }
         return scan
-
-    def send_entry_alerts_whatsapp(self, scan: Dict) -> Dict:
-        """Compatibility wrapper for older dashboard/API routes."""
-        return self.send_entry_alerts_notification(scan)
 
     def entry_alert_window_status(self, now: Optional[datetime] = None) -> Dict:
         now = now or datetime.now(self.eastern_tz)
@@ -333,7 +328,7 @@ class TradeSimulationEngine:
             summary["backfill"] = backfill_result
         return summary
 
-    def send_eod_summary_notification(
+    def send_eod_summary_whatsapp(
         self,
         trade_date: Optional[date] = None,
         label: str = "EOD",
@@ -347,41 +342,27 @@ class TradeSimulationEngine:
             summary["learning"] = self.learning_memory.learn_from_summary(summary)
             summary["missed_mover_learning"] = self._learn_from_missed_movers(summary)
         body = format_simulation_summary_message(summary, label=label)
-        subject = f"Simulated {label.upper()} P/L - {summary.get('trade_date', '')}".strip()
-        sent = self.notifications.send_notification(body, subject=subject)
+        sent = self.notifications.send_openclaw_whatsapp(body)
         summary["delivery"] = {
-            "channel": self.notifications.get_delivery_channel(),
+            "channel": "openclaw_whatsapp",
             "sent": sent,
-            "target": self.notifications.get_delivery_target(),
+            "target": self.notifications.get_openclaw_target(),
             "message": body,
             "error": self.notifications.get_last_error(),
         }
         return summary
 
-    def send_eod_summary_whatsapp(
-        self,
-        trade_date: Optional[date] = None,
-        label: str = "EOD",
-    ) -> Dict:
-        """Compatibility wrapper for older dashboard/API routes."""
-        return self.send_eod_summary_notification(trade_date=trade_date, label=label)
-
-    def send_open_capture_notification(self, capture: Dict) -> Dict:
+    def send_open_capture_whatsapp(self, capture: Dict) -> Dict:
         body = format_open_capture_message(capture)
-        subject = f"Simulated open entries - {capture.get('trade_date', '')}".strip()
-        sent = self.notifications.send_notification(body, subject=subject)
+        sent = self.notifications.send_openclaw_whatsapp(body)
         capture["delivery"] = {
-            "channel": self.notifications.get_delivery_channel(),
+            "channel": "openclaw_whatsapp",
             "sent": sent,
-            "target": self.notifications.get_delivery_target(),
+            "target": self.notifications.get_openclaw_target(),
             "message": body,
             "error": self.notifications.get_last_error(),
         }
         return capture
-
-    def send_open_capture_whatsapp(self, capture: Dict) -> Dict:
-        """Compatibility wrapper for older dashboard/API routes."""
-        return self.send_open_capture_notification(capture)
 
     def _learn_from_missed_movers(self, summary: Dict) -> Dict:
         trade_date = summary.get("trade_date") or self._today_eastern().isoformat()

@@ -9,7 +9,6 @@ import schedule
 
 from config import Config
 from market_calendar import MarketCalendar
-from notifications import NotificationService
 from trading_agent import TradingAgent
 from trade_simulator import (
     TradeSimulationEngine,
@@ -81,7 +80,7 @@ def send_digest_once() -> bool:
         config.TOP_RECOMMENDATIONS_HORIZON,
     )
     agent = TradingAgent()
-    result = agent.send_top_recommendations_notification(
+    result = agent.send_top_recommendations_whatsapp(
         horizon=config.TOP_RECOMMENDATIONS_HORIZON,
         limit=5,
         universe_size=config.TOP_RECOMMENDATIONS_UNIVERSE_SIZE,
@@ -120,13 +119,13 @@ def capture_open_simulation_once() -> bool:
     if result.get("errors"):
         logger.warning("Open simulation errors: %s", result.get("errors"))
 
-    if config.SIMULATION_OPEN_NOTIFICATIONS_ENABLED and result.get("captured", 0) > 0:
-        result = simulator.send_open_capture_notification(result)
+    if config.SIMULATION_OPEN_WHATSAPP_ENABLED and result.get("captured", 0) > 0:
+        result = simulator.send_open_capture_whatsapp(result)
         sent = bool(result.get("delivery", {}).get("sent"))
-        logger.info("Open simulation notification sent=%s", sent)
+        logger.info("Open simulation WhatsApp sent=%s", sent)
         if not sent:
             logger.error(
-                "Open simulation notification failed: %s",
+                "Open simulation WhatsApp failed: %s",
                 result.get("delivery", {}).get("error"),
             )
         return sent
@@ -177,13 +176,13 @@ def monitor_entry_alerts_once(historical: bool = False) -> bool:
     if result.get("captured", 0) <= 0:
         return True
 
-    if config.ENTRY_ALERT_NOTIFICATIONS_ENABLED:
-        result = simulator.send_entry_alerts_notification(result)
+    if config.ENTRY_ALERT_WHATSAPP_ENABLED:
+        result = simulator.send_entry_alerts_whatsapp(result)
         sent = bool(result.get("delivery", {}).get("sent"))
-        logger.info("Entry-alert notification sent=%s", sent)
+        logger.info("Entry-alert WhatsApp sent=%s", sent)
         if not sent:
             logger.error(
-                "Entry-alert notification failed: %s",
+                "Entry-alert WhatsApp failed: %s",
                 result.get("delivery", {}).get("error"),
             )
         return sent
@@ -240,7 +239,7 @@ def send_eod_summary_once(dry_run: bool = False, label: str = "EOD") -> bool:
         print(format_simulation_summary_message(summary, label=label))
         return summary.get("trade_count", 0) > 0
 
-    summary = simulator.send_eod_summary_notification(label=label)
+    summary = simulator.send_eod_summary_whatsapp(label=label)
     backfill = summary.get("backfill") or {}
     if backfill:
         logger.info(
@@ -317,7 +316,7 @@ def run_daemon():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the trading council notification digest.")
+    parser = argparse.ArgumentParser(description="Run the trading council WhatsApp digest.")
     parser.add_argument(
         "--run-once",
         action="store_true",
@@ -346,22 +345,17 @@ def main():
     parser.add_argument(
         "--send-eod-summary",
         action="store_true",
-        help="Send the simulated end-of-day P&L notification summary and exit.",
+        help="Send the simulated end-of-day P&L WhatsApp summary and exit.",
     )
     parser.add_argument(
         "--send-midday-summary",
         action="store_true",
-        help="Send the simulated midday P&L notification summary and exit.",
-    )
-    parser.add_argument(
-        "--send-test-notification",
-        action="store_true",
-        help="Send a test notification through the configured channel and exit.",
+        help="Send the simulated midday P&L WhatsApp summary and exit.",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print the end-of-day summary instead of sending a notification.",
+        help="Print the end-of-day summary instead of sending WhatsApp.",
     )
     parser.add_argument(
         "--print-open-message",
@@ -399,9 +393,6 @@ def main():
         raise SystemExit(
             0 if monitor_entry_alerts_once(historical=args.historical_entry_backfill) else 1
         )
-    if args.send_test_notification:
-        notifier = NotificationService()
-        raise SystemExit(0 if notifier.send_test() else 1)
     if args.send_midday_summary:
         raise SystemExit(0 if send_eod_summary_once(dry_run=args.dry_run, label="MIDDAY") else 1)
     if args.send_eod_summary:
