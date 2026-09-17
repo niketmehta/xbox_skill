@@ -112,34 +112,32 @@ class TradeSimulationEngine:
         max_alerts: Optional[int] = None,
         historical: bool = False,
     ) -> Dict:
-        """Capture simulated entries when top picks hit intraday dip criteria."""
+        """Capture dip entries from current, historical, and overflow council picks."""
         trade_date = trade_date or self._today_eastern()
         top_n = max(1, min(int(top_n or self.config.SIMULATION_TOP_N), 10))
         max_alerts = max(
             1,
-            min(int(max_alerts or self.config.ENTRY_ALERT_MAX_ALERTS_PER_SCAN), top_n),
+            int(max_alerts or self.config.ENTRY_ALERT_MAX_ALERTS_PER_SCAN),
         )
-        run = self._latest_recommendation_run(trade_date)
-        if not run:
+        candidates = self._entry_alert_candidates(trade_date, top_n)
+        if not candidates:
             return {
                 "trade_date": trade_date.isoformat(),
                 "mode": "intraday_dip_alert",
                 "captured": 0,
-                "error": "No recommendation run found for today",
+                "error": "No current or historical recommendation candidates found",
                 "alerts": [],
                 "evaluated": [],
             }
 
-        result = json.loads(run["payload_json"])
-        picks = result.get("recommendations", [])[:top_n]
-        existing_symbols = self._existing_simulated_symbols(trade_date, run["run_id"])
+        existing_symbols = self._existing_simulated_symbols(trade_date)
         evaluated = []
         skipped_existing = []
         qualified = []
         captured = []
         errors = []
 
-        for pick in picks:
+        for run, result, pick, source in candidates:
             symbol = str(pick.get("symbol", "")).upper()
             if not symbol:
                 continue
@@ -155,15 +153,19 @@ class TradeSimulationEngine:
                     historical=historical,
                 )
                 alert["rank"] = int(pick.get("rank") or 0)
+                alert["candidate_source"] = source
+                alert["recommended_at"] = run.get("generated_at")
                 evaluated.append(alert)
                 if alert.get("qualified"):
-                    qualified.append((self._safe_float(alert.get("entry_score")), pick, alert))
+                    qualified.append(
+                        (self._safe_float(alert.get("entry_score")), run, result, pick, alert)
+                    )
             except Exception as exc:
                 self.logger.error("Could not evaluate entry alert for %s: %s", symbol, exc)
                 errors.append({"symbol": symbol, "error": str(exc)})
 
         qualified.sort(key=lambda item: item[0], reverse=True)
-        for _, pick, alert in qualified[:max_alerts]:
+        for _, run, result, pick, alert in qualified[:max_alerts]:
             try:
                 row = self._entry_alert_trade_row(
                     run=run,
@@ -182,11 +184,10 @@ class TradeSimulationEngine:
         start_dt, end_dt = self._entry_alert_bounds(trade_date)
         return {
             "trade_date": trade_date.isoformat(),
-            "run_id": run["run_id"],
             "mode": "intraday_dip_alert",
             "historical": historical,
             "captured": len(captured),
-            "requested": len(picks),
+            "requested": len(candidates),
             "alerts": captured,
             "evaluated": sorted(
                 evaluated,
@@ -203,7 +204,88 @@ class TradeSimulationEngine:
             },
             "target_weekly": self.config.PROFIT_TARGET_WEEKLY,
             "target_monthly": self.config.PROFIT_TARGET_MONTHLY,
+            "candidate_sources": self._candidate_source_counts(candidates),
         }
+
+    def _entry_alert_candidates(self, trade_date: date, top_n: int) -> List[Tuple[Dict, Dict, Dict, str]]:
+        """Return one best/latest thesis per symbol, with today's top picks first."""
+        lookback_days = max(
+            1,
+            int(getattr(self.config, "ENTRY_ALERT_RECOMMENDATION_LOOKBACK_DAYS", 45)),
+        )
+        earliest = trade_date - timedelta(days=lookback_days)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT run_id, generated_at, horizon, payload_json
+                FROM recommendation_runs
+                WHERE substr(generated_at, 1, 10) BETWEEN ? AND ?
+                ORDER BY generated_at DESC
+                """,
+                (earliest.isoformat(), trade_date.isoformat()),
+            ).fetchall()
+
+        candidates = []
+        seen = set()
+        today = trade_date.isoformat()
+
+        def add(run: Dict, result: Dict, pick: Dict, source: str):
+            symbol = str(pick.get("symbol") or "").strip().upper()
+            if not symbol or symbol in seen or not self._is_stock_candidate(symbol):
+                return
+            if not self._safe_float(pick.get("exit_price")) or not self._safe_float(pick.get("stop_loss")):
+                return
+            normalized = dict(pick)
+            normalized["symbol"] = symbol
+            normalized.setdefault("horizon", result.get("horizon", run.get("horizon", "WEEK")))
+            seen.add(symbol)
+            candidates.append((run, result, normalized, source))
+
+        decoded = []
+        for row in rows:
+            run = dict(row)
+            try:
+                decoded.append((run, json.loads(run["payload_json"])))
+            except (TypeError, ValueError) as exc:
+                self.logger.warning("Could not decode recommendation run %s: %s", run.get("run_id"), exc)
+
+        # Today's published recommendations retain first priority.
+        for run, result in decoded:
+            if str(run.get("generated_at", ""))[:10] != today:
+                continue
+            for pick in (result.get("recommendations") or [])[:top_n]:
+                add(run, result, pick, "today_top")
+
+        # Any still-active prior recommendation can trigger on a later dip.
+        for run, result in decoded:
+            source = "today_recommendation" if str(run.get("generated_at", ""))[:10] == today else "historical_recommendation"
+            for pick in result.get("recommendations") or []:
+                add(run, result, pick, source)
+
+        # Actionable BUY candidates below the displayed top-N are eligible too.
+        if getattr(self.config, "ENTRY_ALERT_INCLUDE_OVERFLOW_CANDIDATES", True):
+            overflow_limit = max(0, int(getattr(self.config, "ENTRY_ALERT_OVERFLOW_LIMIT", 20)))
+            added = 0
+            for run, result in decoded:
+                if str(run.get("generated_at", ""))[:10] != today:
+                    continue
+                for pick in result.get("candidate_snapshot") or []:
+                    if added >= overflow_limit:
+                        break
+                    if not pick.get("actionable") or str(pick.get("action", "")).upper() != "BUY":
+                        continue
+                    before = len(candidates)
+                    add(run, result, pick, "today_overflow")
+                    added += len(candidates) - before
+
+        return candidates
+
+    def _candidate_source_counts(self, candidates: List[Tuple[Dict, Dict, Dict, str]]) -> Dict[str, int]:
+        counts = {}
+        for _, _, _, source in candidates:
+            counts[source] = counts.get(source, 0) + 1
+        return counts
 
     def send_entry_alerts_whatsapp(self, scan: Dict) -> Dict:
         body = format_entry_alert_message(scan)
@@ -342,6 +424,88 @@ class TradeSimulationEngine:
             summary["learning"] = self.learning_memory.learn_from_summary(summary)
             summary["missed_mover_learning"] = self._learn_from_missed_movers(summary)
         body = format_simulation_summary_message(summary, label=label)
+        sent = self.notifications.send_openclaw_whatsapp(body)
+        summary["delivery"] = {
+            "channel": "openclaw_whatsapp",
+            "sent": sent,
+            "target": self.notifications.get_openclaw_target(),
+            "message": body,
+            "error": self.notifications.get_last_error(),
+        }
+        return summary
+
+    def build_period_summary(
+        self,
+        period: str,
+        as_of: Optional[date] = None,
+    ) -> Dict:
+        """Aggregate completed daily recommendation simulations for a calendar period."""
+        as_of = as_of or self._today_eastern()
+        period = str(period or "WEEK").upper()
+        if period == "WEEK":
+            start_date = as_of - timedelta(days=as_of.weekday())
+        elif period == "MONTH":
+            start_date = as_of.replace(day=1)
+        else:
+            raise ValueError("period must be WEEK or MONTH")
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT trade_date, symbol, entry_price, quantity, notional,
+                       mark_price, pnl, pnl_pct, outcome
+                FROM simulated_recommendation_trades
+                WHERE trade_date BETWEEN ? AND ? AND pnl IS NOT NULL
+                ORDER BY trade_date ASC, symbol ASC
+                """,
+                (start_date.isoformat(), as_of.isoformat()),
+            ).fetchall()
+
+        trades = [dict(row) for row in rows]
+        total_entry_value = sum(
+            self._safe_float(row.get("entry_price")) * self._safe_float(row.get("quantity"))
+            for row in trades
+        )
+        total_pnl = sum(self._safe_float(row.get("pnl")) for row in trades)
+        total_pnl_pct = (total_pnl / total_entry_value * 100) if total_entry_value else 0.0
+        winners = sum(1 for row in trades if self._safe_float(row.get("pnl")) > 0)
+        daily_pnl = {}
+        for row in trades:
+            day = row.get("trade_date")
+            daily_pnl[day] = daily_pnl.get(day, 0.0) + self._safe_float(row.get("pnl"))
+
+        return {
+            "period": period,
+            "start_date": start_date.isoformat(),
+            "end_date": as_of.isoformat(),
+            "trade_count": len(trades),
+            "trading_days": len(daily_pnl),
+            "winners": winners,
+            "losers": len(trades) - winners,
+            "total_entry_value": total_entry_value,
+            "total_pnl": total_pnl,
+            "total_pnl_pct": total_pnl_pct,
+            "target": (
+                self.config.PROFIT_TARGET_WEEKLY
+                if period == "WEEK"
+                else self.config.PROFIT_TARGET_MONTHLY
+            ),
+            "daily_pnl": [
+                {"date": day, "pnl": pnl}
+                for day, pnl in sorted(daily_pnl.items())
+            ],
+            "trades": trades,
+            "generated_at": datetime.now().isoformat(),
+        }
+
+    def send_period_summary_whatsapp(
+        self,
+        period: str,
+        as_of: Optional[date] = None,
+    ) -> Dict:
+        summary = self.build_period_summary(period, as_of=as_of)
+        body = format_period_summary_message(summary)
         sent = self.notifications.send_openclaw_whatsapp(body)
         summary["delivery"] = {
             "channel": "openclaw_whatsapp",
@@ -668,22 +832,30 @@ class TradeSimulationEngine:
             "stop_loss": self._safe_float(pick.get("stop_loss")),
             "confidence": self._safe_float(pick.get("confidence")),
             "council_score": self._safe_float(pick.get("council_score")),
-            "open_source": "intraday_dip_alert",
+            "open_source": f"intraday_dip_alert:{alert.get('candidate_source', 'recommendation')}",
             "entry_score": alert.get("entry_score"),
             "entry_reason": "; ".join(alert.get("reasons", [])),
             "entry_metrics": alert,
         }
 
-    def _existing_simulated_symbols(self, trade_date: date, run_id: str) -> set:
+    def _existing_simulated_symbols(self, trade_date: date, run_id: Optional[str] = None) -> set:
         with sqlite3.connect(self.db_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT symbol
-                FROM simulated_recommendation_trades
-                WHERE trade_date = ? AND run_id = ?
-                """,
-                (trade_date.isoformat(), run_id),
-            ).fetchall()
+            if run_id:
+                rows = conn.execute(
+                    """
+                    SELECT symbol FROM simulated_recommendation_trades
+                    WHERE trade_date = ? AND run_id = ?
+                    """,
+                    (trade_date.isoformat(), run_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT symbol FROM simulated_recommendation_trades
+                    WHERE trade_date = ?
+                    """,
+                    (trade_date.isoformat(),),
+                ).fetchall()
             return {str(row[0] or "").upper() for row in rows}
 
     def _risk_reward_for_entry(self, entry_price: float, stop_loss: float, exit_target: float) -> float:
@@ -1068,6 +1240,40 @@ def format_simulation_summary_message(summary: Dict, label: str = "EOD") -> str:
     return "\n".join(lines).strip()
 
 
+def format_period_summary_message(summary: Dict) -> str:
+    period = str(summary.get("period") or "WEEK").upper()
+    title = "End-of-week" if period == "WEEK" else "End-of-month"
+    total_pnl = float(summary.get("total_pnl") or 0)
+    target = float(summary.get("target") or 0)
+    target_gap = total_pnl - target
+    lines = [
+        (
+            f"Simulated {title} P/L - {summary.get('start_date')} to "
+            f"{summary.get('end_date')}: {_format_signed_dollars(total_pnl)} "
+            f"({float(summary.get('total_pnl_pct') or 0):+.2f}%)"
+        ),
+        (
+            f"Trades: {summary.get('trade_count', 0)} across "
+            f"{summary.get('trading_days', 0)} day(s) | "
+            f"Win/loss: {summary.get('winners', 0)}/{summary.get('losers', 0)}"
+        ),
+        (
+            f"Target: ${target:.2f} | "
+            f"{'above' if target_gap >= 0 else 'below'} by ${abs(target_gap):.2f}"
+        ),
+        "Mode: simulated recommendation entries; no real-order P/L included.",
+    ]
+    daily = summary.get("daily_pnl") or []
+    if daily:
+        lines.append("")
+        lines.append("Daily totals:")
+        for row in daily:
+            lines.append(f"{row.get('date')}: {_format_signed_dollars(row.get('pnl', 0))}")
+    else:
+        lines.append("No completed simulated entries were recorded for this period.")
+    return "\n".join(lines).strip()
+
+
 def format_entry_alert_message(scan: Dict) -> str:
     alerts = scan.get("alerts", [])
     trade_date = scan.get("trade_date", "")
@@ -1085,7 +1291,7 @@ def format_entry_alert_message(scan: Dict) -> str:
         ),
         (
             f"Captured {scan.get('captured', 0)}/{scan.get('requested', 0)} "
-            "top picks that met the intraday dip rules."
+            "eligible candidates that met the intraday dip rules."
         ),
         "Mode: alert + simulated entry only; no real order placed.",
         (
@@ -1118,9 +1324,12 @@ def format_entry_alert_message(scan: Dict) -> str:
         metrics = alert.get("entry_metrics") or {}
         entry_value = float(alert.get("entry_price", 0) or 0) * float(alert.get("quantity", 0) or 0)
         reasons = "; ".join(metrics.get("reasons", [])[:3] or [alert.get("entry_reason", "")])
+        source = str(metrics.get("candidate_source") or "recommendation").replace("_", " ")
+        rank = int(alert.get("rank") or 0)
+        label = f"{rank}." if rank > 0 else "Watch:"
         lines.append(
             (
-                f"{alert.get('rank')}. {alert.get('symbol')}: "
+                f"{label} {alert.get('symbol')}: "
                 f"buy near ${alert.get('entry_price', 0):.2f} | "
                 f"sim ${entry_value:.2f} x {alert.get('quantity', 0):.4f}"
             )
@@ -1141,6 +1350,7 @@ def format_entry_alert_message(scan: Dict) -> str:
         )
         if reasons:
             lines.append(f"Why: {reasons}")
+        lines.append(f"Source: {source}")
 
     lines.append("")
     lines.append("Confirm in the app before placing live trades.")

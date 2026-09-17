@@ -14,6 +14,7 @@ from trade_simulator import (
     TradeSimulationEngine,
     format_entry_alert_message,
     format_open_capture_message,
+    format_period_summary_message,
     format_simulation_summary_message,
 )
 
@@ -154,8 +155,11 @@ def monitor_entry_alerts_once(historical: bool = False) -> bool:
         max_alerts=config.ENTRY_ALERT_MAX_ALERTS_PER_SCAN,
         historical=historical,
     )
-    if result.get("error") == "No recommendation run found for today":
-        logger.warning("No recommendation run found for today; generating digest before entry scan")
+    if result.get("error") in {
+        "No recommendation run found for today",
+        "No current or historical recommendation candidates found",
+    }:
+        logger.warning("No eligible recommendation candidates found; generating digest before entry scan")
         if send_digest_once():
             simulator = TradeSimulationEngine()
             result = simulator.capture_entry_alerts(
@@ -264,6 +268,48 @@ def send_eod_summary_once(dry_run: bool = False, label: str = "EOD") -> bool:
             label,
             summary.get("delivery", {}).get("error"),
         )
+    period_ok = True
+    if label.upper() == "EOD" and config.PERIOD_SUMMARIES_ENABLED:
+        calendar = MarketCalendar()
+        today = calendar.today_eastern()
+        periods = []
+        if calendar.is_last_trading_day_of_week(today):
+            periods.append("WEEK")
+        if calendar.is_last_trading_day_of_month(today):
+            periods.append("MONTH")
+        for period in periods:
+            period_ok = send_period_summary_once(period) and period_ok
+    return sent and period_ok
+
+
+def send_period_summary_once(period: str, dry_run: bool = False) -> bool:
+    config = Config()
+    logger = logging.getLogger("daily_digest_runner")
+    if not config.SIMULATION_ENABLED or not config.PERIOD_SUMMARIES_ENABLED:
+        logger.info("Period summaries are disabled")
+        return True
+
+    simulator = TradeSimulationEngine()
+    if dry_run:
+        summary = simulator.build_period_summary(period)
+        print(format_period_summary_message(summary))
+        return True
+
+    summary = simulator.send_period_summary_whatsapp(period)
+    sent = bool(summary.get("delivery", {}).get("sent"))
+    logger.info(
+        "%s simulation summary sent=%s trades=%s total_pnl=%.2f",
+        period.upper(),
+        sent,
+        summary.get("trade_count", 0),
+        summary.get("total_pnl", 0),
+    )
+    if not sent:
+        logger.error(
+            "%s simulation summary delivery failed: %s",
+            period.upper(),
+            summary.get("delivery", {}).get("error"),
+        )
     return sent
 
 
@@ -353,6 +399,16 @@ def main():
         help="Send the simulated midday P&L WhatsApp summary and exit.",
     )
     parser.add_argument(
+        "--send-weekly-summary",
+        action="store_true",
+        help="Send the current calendar-week simulated P/L summary and exit.",
+    )
+    parser.add_argument(
+        "--send-monthly-summary",
+        action="store_true",
+        help="Send the current calendar-month simulated P/L summary and exit.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the end-of-day summary instead of sending WhatsApp.",
@@ -395,6 +451,10 @@ def main():
         )
     if args.send_midday_summary:
         raise SystemExit(0 if send_eod_summary_once(dry_run=args.dry_run, label="MIDDAY") else 1)
+    if args.send_weekly_summary:
+        raise SystemExit(0 if send_period_summary_once("WEEK", dry_run=args.dry_run) else 1)
+    if args.send_monthly_summary:
+        raise SystemExit(0 if send_period_summary_once("MONTH", dry_run=args.dry_run) else 1)
     if args.send_eod_summary:
         raise SystemExit(0 if send_eod_summary_once(dry_run=args.dry_run, label="EOD") else 1)
     run_daemon()

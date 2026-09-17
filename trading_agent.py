@@ -500,6 +500,21 @@ class TradingAgent:
                 "Simulated end-of-day P&L summary was not delivered: %s",
                 result.get("delivery", {}).get("error"),
             )
+        if self.config.PERIOD_SUMMARIES_ENABLED:
+            today = self.market_calendar.today_eastern()
+            periods = []
+            if self.market_calendar.is_last_trading_day_of_week(today):
+                periods.append("WEEK")
+            if self.market_calendar.is_last_trading_day_of_month(today):
+                periods.append("MONTH")
+            for period in periods:
+                period_result = self.trade_simulator.send_period_summary_whatsapp(period)
+                if not period_result.get("delivery", {}).get("sent"):
+                    self.logger.warning(
+                        "Simulated %s P&L summary was not delivered: %s",
+                        period.lower(),
+                        period_result.get("delivery", {}).get("error"),
+                    )
 
     def _send_scheduled_midday_simulation_summary(self):
         if not self._should_run_market_job("scheduled midday simulation summary"):

@@ -29,6 +29,28 @@ class MarketCalendar:
         session = self.get_session(check_date)
         return bool(session.get("is_trading_day"))
 
+    def next_trading_day(self, check_date: Optional[date] = None) -> date:
+        """Return the next US-equities session after check_date."""
+        current = (check_date or self.today_eastern()) + timedelta(days=1)
+        for _ in range(10):
+            if self.is_trading_day(current):
+                return current
+            current += timedelta(days=1)
+        return current
+
+    def is_last_trading_day_of_week(self, check_date: Optional[date] = None) -> bool:
+        check_date = check_date or self.today_eastern()
+        if not self.is_trading_day(check_date):
+            return False
+        return self.next_trading_day(check_date).isocalendar()[:2] != check_date.isocalendar()[:2]
+
+    def is_last_trading_day_of_month(self, check_date: Optional[date] = None) -> bool:
+        check_date = check_date or self.today_eastern()
+        if not self.is_trading_day(check_date):
+            return False
+        next_session = self.next_trading_day(check_date)
+        return (next_session.year, next_session.month) != (check_date.year, check_date.month)
+
     def get_session(self, check_date: Optional[date] = None) -> Dict:
         check_date = check_date or self.today_eastern()
         iso_date = check_date.isoformat()

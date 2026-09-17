@@ -685,6 +685,35 @@ def send_recommendation_simulation_eod_whatsapp():
         app.logger.error(f"Error sending simulated EOD summary: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/recommendations/simulation/period/<period>')
+def get_recommendation_simulation_period(period):
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        result = trading_agent.trade_simulator.build_period_summary(period.upper())
+        return jsonify(convert_numpy_types(result))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        app.logger.error(f"Error getting simulated period summary: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/recommendations/simulation/period/<period>/send-whatsapp', methods=['POST'])
+def send_recommendation_simulation_period_whatsapp(period):
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        result = trading_agent.trade_simulator.send_period_summary_whatsapp(period.upper())
+        result = convert_numpy_types(result)
+        if result.get('delivery', {}).get('sent'):
+            return jsonify(result)
+        return jsonify({'error': 'Failed to send period summary.', **result}), 400
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        app.logger.error(f"Error sending simulated period summary: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/analyze/<symbol>')
 def analyze_symbol(symbol):
     if not trading_agent:

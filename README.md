@@ -145,7 +145,11 @@ ENTRY_ALERT_STOP_BUFFER_PCT=0.35
 ENTRY_ALERT_MIN_RISK_REWARD=1.40
 ENTRY_ALERT_MIN_TARGET_UPSIDE_PCT=1.0
 ENTRY_ALERT_MAX_ALERTS_PER_SCAN=2
+ENTRY_ALERT_RECOMMENDATION_LOOKBACK_DAYS=45
+ENTRY_ALERT_INCLUDE_OVERFLOW_CANDIDATES=true
+ENTRY_ALERT_OVERFLOW_LIMIT=20
 ENTRY_ALERT_WHATSAPP_ENABLED=true
+PERIOD_SUMMARIES_ENABLED=true
 PROFIT_TARGET_WEEKLY=500
 PROFIT_TARGET_MONTHLY=2000
 ```
@@ -165,8 +169,9 @@ PROFIT_TARGET_MONTHLY=2000
 - Recommendation payloads save the screened universe and a lightweight candidate snapshot for later missed-pick audits.
 - Digests include supplemental "held momentum review" and "intraday breakout watch" sections so strong existing positions or fast movers can surface even when the conservative council does not mark them as fresh top BUY picks.
 - Scheduled digest/simulation jobs run on weekdays and also check the Alpaca US equities calendar at runtime, so weekends and market holidays are skipped cleanly.
-- Intraday entry alerts scan after the opening volatility window and look for a dip, bounce, usable stop distance, and improved risk/reward before sending a WhatsApp buy alert. Alerts are simulated entries only; live orders still require manual approval unless `AUTO_TRADE_ENABLED=true`.
+- Intraday entry alerts scan after the opening volatility window and look for a dip, bounce, usable stop distance, and improved risk/reward before sending a WhatsApp buy alert. The scan includes today's top picks, recommendations from the prior 45 days, and up to 20 actionable BUY candidates that ranked below the displayed top five. Each symbol can alert only once per trading day. Alerts are simulated entries only; live orders still require manual approval unless `AUTO_TRADE_ENABLED=true`.
 - MIDDAY/EOD simulation summaries backfill entry-alert rows from the latest recommendation run when the monitor was missed, and include all captured same-day recommendation runs so earlier picks are not hidden.
+- End-of-week and end-of-month simulated P/L summaries are sent after EOD on the final US-equities session of each period, including holiday-shortened weeks/months. Manual endpoints are `GET /api/recommendations/simulation/period/WEEK|MONTH` and `POST /api/recommendations/simulation/period/WEEK|MONTH/send-whatsapp`.
 - Backfill or inspect learning with `py -3 scripts\rebuild_council_memory.py` and `py -3 scripts\analyze_recommendation_history.py`.
 
 ### Trading Hours

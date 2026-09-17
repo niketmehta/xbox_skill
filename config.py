@@ -81,7 +81,13 @@ class Config:
     ENTRY_ALERT_MIN_RISK_REWARD = float(os.getenv('ENTRY_ALERT_MIN_RISK_REWARD', 1.40))
     ENTRY_ALERT_MIN_TARGET_UPSIDE_PCT = float(os.getenv('ENTRY_ALERT_MIN_TARGET_UPSIDE_PCT', 1.0))
     ENTRY_ALERT_MAX_ALERTS_PER_SCAN = int(os.getenv('ENTRY_ALERT_MAX_ALERTS_PER_SCAN', 2))
+    # Keep prior council picks eligible for dip alerts, and also consider
+    # actionable candidates that ranked below the published top-N list.
+    ENTRY_ALERT_RECOMMENDATION_LOOKBACK_DAYS = int(os.getenv('ENTRY_ALERT_RECOMMENDATION_LOOKBACK_DAYS', 45))
+    ENTRY_ALERT_INCLUDE_OVERFLOW_CANDIDATES = os.getenv('ENTRY_ALERT_INCLUDE_OVERFLOW_CANDIDATES', 'true').lower() == 'true'
+    ENTRY_ALERT_OVERFLOW_LIMIT = int(os.getenv('ENTRY_ALERT_OVERFLOW_LIMIT', 20))
     ENTRY_ALERT_WHATSAPP_ENABLED = os.getenv('ENTRY_ALERT_WHATSAPP_ENABLED', 'true').lower() == 'true'
+    PERIOD_SUMMARIES_ENABLED = os.getenv('PERIOD_SUMMARIES_ENABLED', 'true').lower() == 'true'
     PROFIT_TARGET_WEEKLY = float(os.getenv('PROFIT_TARGET_WEEKLY', 500))
     PROFIT_TARGET_MONTHLY = float(os.getenv('PROFIT_TARGET_MONTHLY', 2000))
     
