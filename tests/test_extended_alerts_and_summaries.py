@@ -7,6 +7,8 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
+import pandas as pd
+
 from market_calendar import MarketCalendar
 from trade_simulator import TradeSimulationEngine, format_period_summary_message
 
@@ -40,6 +42,13 @@ class ExtendedAlertTests(unittest.TestCase):
             ENTRY_ALERT_RECOMMENDATION_LOOKBACK_DAYS=45,
             ENTRY_ALERT_INCLUDE_OVERFLOW_CANDIDATES=True,
             ENTRY_ALERT_OVERFLOW_LIMIT=20,
+            ENTRY_ALERT_MIN_DIP_PCT=1.0,
+            ENTRY_ALERT_MIN_BOUNCE_PCT=0.15,
+            ENTRY_ALERT_MAX_CHASE_PCT=0.50,
+            ENTRY_ALERT_STOP_BUFFER_PCT=0.35,
+            ENTRY_ALERT_MIN_RISK_REWARD=2.0,
+            ENTRY_ALERT_MIN_TARGET_UPSIDE_PCT=1.0,
+            TOP_RECOMMENDATIONS_MIN_CONFIDENCE=60,
             PROFIT_TARGET_WEEKLY=500,
             PROFIT_TARGET_MONTHLY=2000,
         )
@@ -111,6 +120,48 @@ class ExtendedAlertTests(unittest.TestCase):
         self.assertEqual(summary["total_pnl"], 40)
         self.assertAlmostEqual(summary["total_pnl_pct"], 40 / 3000 * 100)
         self.assertIn("End-of-week", format_period_summary_message(summary))
+
+    def _intraday_frame(self, final_price, session_high=102):
+        return pd.DataFrame(
+            {
+                "Open": [98.0, 98.2, 98.5, final_price],
+                "High": [session_high, 98.7, 99.0, final_price + 0.1],
+                "Low": [97.8, 98.0, 98.3, final_price - 0.1],
+                "Close": [98.0, 98.2, 98.5, final_price],
+                "Volume": [100, 100, 100, 100],
+            }
+        )
+
+    def test_dip_alert_requires_discount_to_pick_not_only_drop_from_high(self):
+        candidate = self.engine._score_entry_alert_candidate(
+            pick("AAA"), self._intraday_frame(100.5, session_high=104), 3
+        )
+
+        self.assertGreater(candidate["drop_from_high_pct"], 1.0)
+        self.assertEqual(candidate["drop_from_reference_pct"], 0.0)
+        self.assertFalse(candidate["qualified"])
+        self.assertTrue(any("discount vs pick" in reason for reason in candidate["fail_reasons"]))
+
+    def test_dip_alert_requires_two_to_one_reward_risk(self):
+        candidate_pick = pick("AAA")
+        candidate_pick["exit_price"] = 102
+        candidate = self.engine._score_entry_alert_candidate(
+            candidate_pick, self._intraday_frame(99.0), 3
+        )
+
+        self.assertEqual(candidate["drop_from_reference_pct"], 1.0)
+        self.assertLess(candidate["risk_reward"], 2.0)
+        self.assertFalse(candidate["qualified"])
+        self.assertTrue(any("risk/reward" in reason for reason in candidate["fail_reasons"]))
+
+    def test_dip_alert_qualifies_at_new_bargain_thresholds(self):
+        candidate = self.engine._score_entry_alert_candidate(
+            pick("AAA"), self._intraday_frame(99.0), 3
+        )
+
+        self.assertEqual(candidate["drop_from_reference_pct"], 1.0)
+        self.assertGreaterEqual(candidate["risk_reward"], 2.0)
+        self.assertTrue(candidate["qualified"], candidate["fail_reasons"])
 
 
 class MarketCalendarBoundaryTests(unittest.TestCase):

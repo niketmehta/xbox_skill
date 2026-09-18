@@ -138,11 +138,11 @@ ENTRY_ALERT_END_TIME=12:30
 ENTRY_ALERT_SCAN_INTERVAL_MINUTES=10
 ENTRY_ALERT_SKIP_OPEN_MINUTES=30
 ENTRY_ALERT_SKIP_CLOSE_MINUTES=45
-ENTRY_ALERT_MIN_DIP_PCT=0.50
+ENTRY_ALERT_MIN_DIP_PCT=1.00
 ENTRY_ALERT_MIN_BOUNCE_PCT=0.15
 ENTRY_ALERT_MAX_CHASE_PCT=0.50
 ENTRY_ALERT_STOP_BUFFER_PCT=0.35
-ENTRY_ALERT_MIN_RISK_REWARD=1.40
+ENTRY_ALERT_MIN_RISK_REWARD=2.00
 ENTRY_ALERT_MIN_TARGET_UPSIDE_PCT=1.0
 ENTRY_ALERT_MAX_ALERTS_PER_SCAN=2
 ENTRY_ALERT_RECOMMENDATION_LOOKBACK_DAYS=45
@@ -169,7 +169,7 @@ PROFIT_TARGET_MONTHLY=2000
 - Recommendation payloads save the screened universe and a lightweight candidate snapshot for later missed-pick audits.
 - Digests include supplemental "held momentum review" and "intraday breakout watch" sections so strong existing positions or fast movers can surface even when the conservative council does not mark them as fresh top BUY picks.
 - Scheduled digest/simulation jobs run on weekdays and also check the Alpaca US equities calendar at runtime, so weekends and market holidays are skipped cleanly.
-- Intraday entry alerts scan after the opening volatility window and look for a dip, bounce, usable stop distance, and improved risk/reward before sending a WhatsApp buy alert. The scan includes today's top picks, recommendations from the prior 45 days, and up to 20 actionable BUY candidates that ranked below the displayed top five. Each symbol can alert only once per trading day. Alerts are simulated entries only; live orders still require manual approval unless `AUTO_TRADE_ENABLED=true`.
+- Intraday entry alerts scan after the opening volatility window and require at least a 1% discount to the council's original buy zone, a bounce, usable stop distance, and at least 2.00x reward/risk before sending a WhatsApp buy alert. A pullback from the session high is still reported but does not count as the required bargain. The scan includes today's top picks, recommendations from the prior 45 days, and up to 20 actionable BUY candidates that ranked below the displayed top five. Each symbol can alert only once per trading day. Alerts are simulated entries only; live orders still require manual approval unless `AUTO_TRADE_ENABLED=true`.
 - MIDDAY/EOD simulation summaries backfill entry-alert rows from the latest recommendation run when the monitor was missed, and include all captured same-day recommendation runs so earlier picks are not hidden.
 - End-of-week and end-of-month simulated P/L summaries are sent after EOD on the final US-equities session of each period, including holiday-shortened weeks/months. Manual endpoints are `GET /api/recommendations/simulation/period/WEEK|MONTH` and `POST /api/recommendations/simulation/period/WEEK|MONTH/send-whatsapp`.
 - Backfill or inspect learning with `py -3 scripts\rebuild_council_memory.py` and `py -3 scripts\analyze_recommendation_history.py`.

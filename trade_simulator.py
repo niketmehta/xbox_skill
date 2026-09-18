@@ -709,7 +709,10 @@ class TradeSimulationEngine:
         vwap = self._intraday_vwap(history) or price
         volume_ratio = self._intraday_volume_ratio(history)
 
-        dip_pct = max(drop_from_reference_pct, drop_from_high_pct)
+        # A dip-entry bargain must be below the council's original buy zone.
+        # A pullback from an intraday high alone can still leave the stock more
+        # expensive than the pick price, so it is reported but does not qualify.
+        dip_pct = drop_from_reference_pct
         dip_enough = dip_pct >= self.config.ENTRY_ALERT_MIN_DIP_PCT
         bounce_enough = bounce_from_low_pct >= self.config.ENTRY_ALERT_MIN_BOUNCE_PCT
         near_buy_zone = chase_pct <= self.config.ENTRY_ALERT_MAX_CHASE_PCT
@@ -725,7 +728,9 @@ class TradeSimulationEngine:
 
         fail_reasons = []
         if not dip_enough:
-            fail_reasons.append(f"dip {dip_pct:.2f}% < {self.config.ENTRY_ALERT_MIN_DIP_PCT:.2f}%")
+            fail_reasons.append(
+                f"discount vs pick {dip_pct:.2f}% < {self.config.ENTRY_ALERT_MIN_DIP_PCT:.2f}%"
+            )
         if not bounce_enough:
             fail_reasons.append(
                 f"bounce {bounce_from_low_pct:.2f}% < {self.config.ENTRY_ALERT_MIN_BOUNCE_PCT:.2f}%"
@@ -772,8 +777,6 @@ class TradeSimulationEngine:
         if qualified:
             if drop_from_reference_pct >= self.config.ENTRY_ALERT_MIN_DIP_PCT:
                 reasons.append("discount to council buy zone")
-            elif drop_from_high_pct >= self.config.ENTRY_ALERT_MIN_DIP_PCT:
-                reasons.append("intraday pullback from high")
             reasons.append("bounce from session low confirmed")
             reasons.append(f"risk/reward {risk_reward:.2f}x")
 
