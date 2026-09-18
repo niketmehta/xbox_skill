@@ -28,6 +28,8 @@ def main() -> int:
         raise SystemExit("OPENCLAW_ALLOWED_TARGETS must contain only E.164 phone numbers")
 
     operations = {
+        "plugins.allow": ["whatsapp", "stock-council-router"],
+        "plugins.entries.stock-council-router.hooks.allowConversationAccess": True,
         "channels.whatsapp.dmPolicy": "allowlist",
         "channels.whatsapp.allowFrom": targets,
         "channels.whatsapp.accounts.default.dmPolicy": "allowlist",
