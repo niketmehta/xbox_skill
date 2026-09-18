@@ -677,6 +677,17 @@ class TradingAgent:
             universe_size=len(symbols),
         )
 
+    def get_symbol_council_recommendation(
+        self,
+        symbol: str,
+        horizon: str = 'WEEK',
+    ) -> Dict:
+        """Return a challenged BUY, SELL, or HOLD council decision for one symbol."""
+        return self.recommendation_engine.get_symbol_recommendation(
+            symbol=symbol,
+            horizon=horizon,
+        )
+
     def send_top_recommendations_whatsapp(
         self,
         horizon: str = 'WEEK',

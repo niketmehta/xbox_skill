@@ -198,12 +198,24 @@ class TopRecommendationEngine:
             actionable=actionable,
             history_adjustment=self._safe_float(history.get("score_adjustment")),
         )
+        arbiter_vote = str(
+            (council.get("votes", {}).get("ArbiterAgent", {}) or {}).get("vote", "CHALLENGE")
+        ).upper()
+        council_action = (
+            action
+            if action in {"BUY", "SELL"}
+            and arbiter_vote == "APPROVE"
+            and not council.get("hard_reject", False)
+            else "HOLD"
+        )
 
         return {
             "symbol": symbol,
             "sector": sector,
             "horizon": horizon,
             "action": action,
+            "council_action": council_action,
+            "arbiter_vote": arbiter_vote,
             "actionable": actionable,
             "current_price": current_price,
             "buy_zone": current_price,
@@ -226,6 +238,30 @@ class TopRecommendationEngine:
             "timestamp": datetime.now().isoformat(),
         }
 
+    def get_symbol_recommendation(self, symbol: str, horizon: str = "WEEK") -> Dict:
+        """Run the complete council for one symbol, including bearish decisions."""
+        symbol = str(symbol or "").strip().upper()
+        horizon = self._normalize_horizon(horizon)
+        analysis = self.trading_strategy.analyze_stock(symbol, horizon=horizon)
+        candidate = self._build_candidate(analysis)
+        if not candidate:
+            return {
+                "symbol": symbol,
+                "horizon": horizon,
+                "error": "No usable market data or analysis was available",
+            }
+
+        result = {
+            **candidate,
+            "generated_at": datetime.now().isoformat(),
+            "council_agents": self.COUNCIL_AGENTS,
+            "disclaimer": (
+                "Research signal only. No trade was placed; confirm before any live order."
+            ),
+        }
+        result["message_preview"] = format_symbol_recommendation_message(result)
+        return result
+
     def _run_council(self, analysis: Dict, risk_reward: float) -> Dict:
         signals = analysis.get("signals", {}) or {}
         risk = analysis.get("risk_score", {}) or {}
@@ -247,7 +283,7 @@ class TopRecommendationEngine:
 
         for agent_name, signal_key in strategy_agents:
             signal = (signals.get(signal_key, {}) or {})
-            vote, note = self._vote_from_signal(signal)
+            vote, note = self._vote_from_signal(signal, rec.get("action", "HOLD"))
             votes[agent_name] = {
                 "vote": vote,
                 "signal": signal.get("signal", "HOLD"),
@@ -299,14 +335,15 @@ class TopRecommendationEngine:
             "thesis": self._unique_text(thesis)[:5],
         }
 
-    def _vote_from_signal(self, signal: Dict) -> Tuple[str, str]:
+    def _vote_from_signal(self, signal: Dict, desired_action: str = "BUY") -> Tuple[str, str]:
         action = str(signal.get("signal", "HOLD")).upper()
+        desired_action = str(desired_action or "HOLD").upper()
         strength = self._safe_float(signal.get("strength", 0))
         reasons = signal.get("reasons", []) or []
         note = reasons[0] if reasons else f"{action} signal at {strength:.1f}% strength"
-        if action == "BUY":
+        if action == desired_action and action in {"BUY", "SELL"}:
             return "APPROVE", note
-        if action == "SELL":
+        if action in {"BUY", "SELL"} and action != desired_action:
             return "CHALLENGE", note
         return "NEUTRAL", note
 
@@ -334,12 +371,21 @@ class TopRecommendationEngine:
         if current_price <= 0:
             objections.append("No usable current price")
             hard_reject = True
-        if exit_price <= current_price:
-            objections.append("Exit target is not above current price")
-            hard_reject = True
-        if stop_loss <= 0 or stop_loss >= current_price:
-            objections.append("Stop loss is not below current price")
-            hard_reject = True
+        action = str(rec.get("action", "HOLD")).upper()
+        if action == "SELL":
+            if exit_price <= 0 or exit_price >= current_price:
+                objections.append("Bearish target is not below current price")
+                hard_reject = True
+            if stop_loss <= current_price:
+                objections.append("Protective stop is not above current price")
+                hard_reject = True
+        else:
+            if exit_price <= current_price:
+                objections.append("Exit target is not above current price")
+                hard_reject = True
+            if stop_loss <= 0 or stop_loss >= current_price:
+                objections.append("Stop loss is not below current price")
+                hard_reject = True
         if risk_reward < 1.15:
             objections.append(f"Risk/reward is thin ({risk_reward:.2f}x)")
         if confidence < self.config.TOP_RECOMMENDATIONS_MIN_CONFIDENCE:
@@ -349,8 +395,8 @@ class TopRecommendationEngine:
             )
         if risk.get("level") == "HIGH" and confidence < 35:
             objections.append("High risk with weak confidence")
-        if rec.get("action") != "BUY":
-            objections.append(f"Primary strategy says {rec.get('action', 'HOLD')}")
+        if action not in {"BUY", "SELL"}:
+            objections.append(f"Primary strategy says {action}")
 
         return ("CHALLENGE" if objections else "APPROVE"), objections, hard_reject
 
@@ -395,10 +441,16 @@ class TopRecommendationEngine:
         return round(max(base, 0), 2)
 
     def _risk_reward(self, current_price: float, stop_loss: float, exit_price: float) -> float:
-        if current_price <= 0 or stop_loss <= 0 or exit_price <= current_price:
+        if current_price <= 0 or stop_loss <= 0 or exit_price <= 0:
             return 0.0
-        risk = current_price - stop_loss
-        reward = exit_price - current_price
+        if stop_loss < current_price < exit_price:
+            risk = current_price - stop_loss
+            reward = exit_price - current_price
+        elif exit_price < current_price < stop_loss:
+            risk = stop_loss - current_price
+            reward = current_price - exit_price
+        else:
+            return 0.0
         if risk <= 0:
             return 0.0
         return round(reward / risk, 2)
@@ -830,6 +882,46 @@ class TopRecommendationEngine:
             seen.add(text)
             unique.append(text)
         return unique
+
+
+def format_symbol_recommendation_message(result: Dict) -> str:
+    """Format one council decision for a concise WhatsApp reply."""
+    symbol = str(result.get("symbol") or "UNKNOWN").upper()
+    horizon = str(result.get("horizon") or "WEEK").upper()
+    verdict = str(result.get("council_action") or "HOLD").upper()
+    model_action = str(result.get("action") or "HOLD").upper()
+    price = float(result.get("current_price") or 0)
+    target = float(result.get("exit_price") or 0)
+    stop = float(result.get("stop_loss") or 0)
+    confidence = float(result.get("confidence") or 0)
+    risk_reward = float(result.get("risk_reward") or 0)
+    approvals = int(result.get("approval_count") or 0)
+    challenges = int(result.get("challenge_count") or 0)
+
+    lines = [
+        f"COUNCIL {verdict}: {symbol} ({horizon})",
+        f"Price ${price:.2f} | confidence {confidence:.1f}%",
+    ]
+    if model_action == "SELL":
+        lines.append(
+            f"Downside target ${target:.2f} | protective stop ${stop:.2f} | reward/risk {risk_reward:.2f}x"
+        )
+    else:
+        lines.append(
+            f"Target ${target:.2f} | stop ${stop:.2f} | reward/risk {risk_reward:.2f}x"
+        )
+    lines.append(f"Council: {approvals} approve, {challenges} challenge")
+
+    thesis = [str(item) for item in (result.get("thesis") or []) if item][:2]
+    objections = [str(item) for item in (result.get("objections") or []) if item][:2]
+    if thesis:
+        lines.append("For: " + "; ".join(thesis))
+    if objections:
+        lines.append("Against: " + "; ".join(objections))
+    if result.get("already_held"):
+        lines.append("Portfolio note: this symbol is already held.")
+    lines.append("Research signal only; no trade was placed.")
+    return "\n".join(lines)
 
 
 def format_top_recommendations_message(result: Dict) -> str:

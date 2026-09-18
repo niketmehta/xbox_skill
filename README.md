@@ -9,7 +9,7 @@ An automated day trading system that analyzes real-time market data, recommends 
 - **Automatic Stock Picking**: Multi-agent council for Top N recommendations
 - **Multi-Strategy Analysis**: Momentum, mean reversion, breakout, and volume-based strategies
 - **Automatic Risk Management**: Stop-loss and take-profit mechanisms
-- **WhatsApp Digests**: OpenClaw messages for picks, intraday dip-entry alerts, and EOD P/L
+- **WhatsApp Council**: OpenClaw replies to a ticker with a BUY, SELL, or HOLD council decision, plus scheduled picks, dip-entry alerts, and EOD P/L
 - **Portfolio Management**: Position tracking, P&L calculation, and performance metrics
 
 ### Web Dashboard
@@ -156,6 +156,7 @@ PROFIT_TARGET_MONTHLY=2000
 
 ### OpenClaw Trading Council
 - `GET /api/recommendations/top5?horizon=WEEK&limit=5` runs the multi-agent council and returns challenged BUY candidates with buy zone, exit target, stop loss, risk/reward, objections, and a WhatsApp-ready digest.
+- `GET /api/recommendations/symbol/NVDA?horizon=WEEK` runs the full council for one ticker and returns a WhatsApp-ready BUY, SELL, or HOLD decision. The deployed `stock-council` OpenClaw skill calls this endpoint when an allowlisted WhatsApp user sends a ticker; it never places an order.
 - `POST /api/recommendations/top5/send-whatsapp` regenerates the council digest and sends it through OpenClaw WhatsApp when `OPENCLAW_ENABLED=true`.
 - OpenClaw sends are restricted to `OPENCLAW_ALLOWED_TARGETS`; contact-list, broadcast, group-ish, multi-recipient, or unapproved targets are blocked before OpenClaw is invoked.
 - The council uses momentum, breakout, mean-reversion, volume, fundamentals, relative strength, macro risk, skeptic, and arbiter agents. Picks are saved to `trading_data.db` for audit.

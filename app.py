@@ -589,6 +589,27 @@ def get_top_recommendations():
         app.logger.error(f"Error getting top recommendations: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/recommendations/symbol/<symbol>')
+def get_symbol_council_recommendation(symbol):
+    """Run the trading council for one validated ticker symbol."""
+    if not trading_agent:
+        return jsonify({'error': 'Trading agent not initialized'}), 500
+    try:
+        symbol = str(symbol or '').strip().upper()
+        if not _SYMBOL_RE.fullmatch(symbol):
+            return jsonify({'error': 'Invalid ticker symbol'}), 400
+        horizon = str(request.args.get('horizon', 'WEEK')).strip().upper()
+        if horizon not in {'WEEK', 'MONTH'}:
+            return jsonify({'error': 'horizon must be WEEK or MONTH'}), 400
+
+        result = trading_agent.get_symbol_council_recommendation(symbol, horizon)
+        status = 404 if result.get('error') else 200
+        return jsonify(convert_numpy_types(result)), status
+    except Exception as e:
+        app.logger.error(f"Error getting symbol council recommendation: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recommendations/top5/send-whatsapp', methods=['POST'])
 def send_top_recommendations_whatsapp():
     if not trading_agent:
