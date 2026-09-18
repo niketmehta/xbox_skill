@@ -1,0 +1,12 @@
+{
+  "id": "stock-council-router",
+  "name": "Stock Council Router",
+  "description": "Routes inbound WhatsApp ticker requests to the local trading council without a model call.",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false
+  }
+}
